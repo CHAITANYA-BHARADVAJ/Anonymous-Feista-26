@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+packages/server/dev.db
+packages/server/dev.db-journal
+packages/server/uploads/
+packages/client/.vite/
+*.tsbuildinfo

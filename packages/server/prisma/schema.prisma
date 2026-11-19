@@ -1,0 +1,203 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Team {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  code      String
+  createdAt DateTime @default(now())
+
+  sessions      TeamSession[]
+  levelProgress TeamLevelProgress[]
+  penalties     Penalty[]
+  checkpoints   TeamCheckpoint[]
+  photos        Photo[]
+  sosAlerts     SosAlert[]
+  locations     TeamLocation[]
+}
+
+model TeamSession {
+  id        Int       @id @default(autoincrement())
+  teamId    Int
+  jti       String    @unique
+  createdAt DateTime  @default(now())
+  revokedAt DateTime?
+
+  team Team @relation(fields: [teamId], references: [id])
+}
+
+model Game {
+  id            Int       @id @default(autoincrement())
+  name          String
+  status        String    @default("idle")
+  startedAt     DateTime?
+  pausedAt      DateTime?
+  totalPausedMs Int       @default(0)
+  endedAt       DateTime?
+
+  levels        Level[]
+  zones         MapZone[]
+  announcements Announcement[]
+}
+
+model Level {
+  id                 Int     @id @default(autoincrement())
+  gameId             Int
+  orderIndex         Int
+  title              String
+  clueText           String
+  locationHint       String
+  answer             String
+  durationSecs       Int?
+  isFinal            Boolean @default(false)
+  mapOverlayGeoJson  String?
+
+  game         Game                @relation(fields: [gameId], references: [id])
+  socialLinks  SocialLink[]
+  hints        Hint[]
+  checkpoints  Checkpoint[]
+  teamProgress TeamLevelProgress[]
+}
+
+model SocialLink {
+  id       Int    @id @default(autoincrement())
+  levelId  Int
+  platform String
+  url      String
+
+  level Level @relation(fields: [levelId], references: [id])
+}
+
+model Hint {
+  id          Int    @id @default(autoincrement())
+  levelId     Int
+  orderIndex  Int
+  text        String
+  penaltyMins Int
+
+  level       Level        @relation(fields: [levelId], references: [id])
+  hintReveals HintReveal[]
+}
+
+model Checkpoint {
+  id           Int     @id @default(autoincrement())
+  levelId      Int
+  kind         String
+  qrPayload    String?
+  questionText String?
+  answer       String?
+  rewardKind   String
+  rewardValue  Int
+
+  level      Level           @relation(fields: [levelId], references: [id])
+  teamClaims TeamCheckpoint[]
+}
+
+model TeamLevelProgress {
+  id          Int       @id @default(autoincrement())
+  teamId      Int
+  levelId     Int
+  unlockedAt  DateTime
+  completedAt DateTime?
+  completedBy String?
+  hintsUsed   Int       @default(0)
+
+  team        Team       @relation(fields: [teamId], references: [id])
+  level       Level      @relation(fields: [levelId], references: [id])
+  hintReveals HintReveal[]
+
+  @@unique([teamId, levelId])
+}
+
+model HintReveal {
+  id         Int      @id @default(autoincrement())
+  progressId Int
+  hintId     Int
+  revealedAt DateTime
+
+  progress TeamLevelProgress @relation(fields: [progressId], references: [id])
+  hint     Hint              @relation(fields: [hintId], references: [id])
+}
+
+model Penalty {
+  id        Int      @id @default(autoincrement())
+  teamId    Int
+  kind      String
+  minutes   Int
+  appliedAt DateTime
+
+  team Team @relation(fields: [teamId], references: [id])
+}
+
+model TeamCheckpoint {
+  id           Int      @id @default(autoincrement())
+  teamId       Int
+  checkpointId Int
+  claimedAt    DateTime
+
+  team       Team       @relation(fields: [teamId], references: [id])
+  checkpoint Checkpoint @relation(fields: [checkpointId], references: [id])
+
+  @@unique([teamId, checkpointId])
+}
+
+model MapZone {
+  id          Int     @id @default(autoincrement())
+  gameId      Int
+  kind        String
+  label       String?
+  geoJson     String
+  penaltyMins Int     @default(5)
+  active      Boolean @default(true)
+
+  game Game @relation(fields: [gameId], references: [id])
+}
+
+model Photo {
+  id          Int       @id @default(autoincrement())
+  teamId      Int
+  filePath    String
+  submittedAt DateTime
+  status      String    @default("pending")
+  reviewedAt  DateTime?
+  reviewNote  String?
+
+  team Team @relation(fields: [teamId], references: [id])
+}
+
+model SosAlert {
+  id     Int      @id @default(autoincrement())
+  teamId Int
+  lat    Float
+  lng    Float
+  sentAt DateTime
+
+  team Team @relation(fields: [teamId], references: [id])
+}
+
+model TeamLocation {
+  id         Int      @id @default(autoincrement())
+  teamId     Int
+  lat        Float
+  lng        Float
+  recordedAt DateTime
+
+  team Team @relation(fields: [teamId], references: [id])
+}
+
+model Announcement {
+  id           Int      @id @default(autoincrement())
+  gameId       Int
+  targetTeamId Int?
+  kind         String
+  message      String
+  sentAt       DateTime
+
+  game Game @relation(fields: [gameId], references: [id])
+}
