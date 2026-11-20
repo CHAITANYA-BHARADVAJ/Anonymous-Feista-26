@@ -36,18 +36,16 @@ export async function buildLeaderboard(): Promise<TeamRanking[]> {
       levelProgress: { include: { level: true }, orderBy: { level: { orderIndex: 'desc' } } },
       penalties: true,
       checkpoints: { include: { checkpoint: true } },
-      photos: { where: { status: 'approved' } },
     },
   });
 
   const rows: TeamRanking[] = teams.map((team) => {
-    const approvedPhoto = team.photos[0];
-    const finished = !!approvedPhoto;
+    const finished = !!team.finishedAt;
     const highestLevel = team.levelProgress[0]?.level?.orderIndex ?? 0;
 
     let adjustedTimeSecs: number | null = null;
-    if (finished && game?.startedAt) {
-      const finishMs = approvedPhoto.reviewedAt!.getTime();
+    if (finished && game?.startedAt && team.finishedAt) {
+      const finishMs = team.finishedAt.getTime();
       const elapsedMs = finishMs - game.startedAt.getTime() - game.totalPausedMs;
       const penaltyMs = team.penalties.reduce((s, p) => s + p.minutes * 60_000, 0);
       const bonusMs = team.checkpoints

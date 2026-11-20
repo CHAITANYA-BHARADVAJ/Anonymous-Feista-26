@@ -14,11 +14,10 @@ const Clues = lazy(() => import('./routes/play/Clues'));
 const MapView = lazy(() => import('./routes/play/MapView'));
 const Leaderboard = lazy(() => import('./routes/play/Leaderboard'));
 const Profile = lazy(() => import('./routes/play/Profile'));
-const Camera = lazy(() => import('./routes/play/Camera'));
 const AdminLayout = lazy(() => import('./routes/admin/AdminLayout'));
 const AdminGame = lazy(() => import('./routes/admin/AdminGame'));
+const AdminTeams = lazy(() => import('./routes/admin/AdminTeams'));
 const AdminLevels = lazy(() => import('./routes/admin/AdminLevels'));
-const AdminPhotos = lazy(() => import('./routes/admin/AdminPhotos'));
 
 function RequireAuth({ role, children }: { role: 'team' | 'admin'; children: JSX.Element }) {
   const authRole = useAuthStore((s) => s.role);
@@ -57,7 +56,6 @@ function AppInner() {
           <Route path="map" element={<MapView />} />
           <Route path="leaderboard" element={<Leaderboard />} />
           <Route path="profile" element={<Profile />} />
-          <Route path="camera" element={<Camera />} />
         </Route>
 
         <Route path="/admin" element={
@@ -65,8 +63,8 @@ function AppInner() {
         }>
           <Route index element={<Navigate to="game" replace />} />
           <Route path="game" element={<AdminGame />} />
+          <Route path="teams" element={<AdminTeams />} />
           <Route path="levels" element={<AdminLevels />} />
-          <Route path="photos" element={<AdminPhotos />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/login" replace />} />

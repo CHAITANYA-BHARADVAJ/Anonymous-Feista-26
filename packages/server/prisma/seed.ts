@@ -12,46 +12,71 @@ async function main() {
   // Create the game
   const game = await prisma.game.upsert({
     where: { id: 1 },
-    update: {},
+    update: {
+      name: 'Campus Hunt 2026 - SDMCET',
+    },
     create: {
       id: 1,
-      name: 'Campus Hunt 2026',
+      name: 'Campus Hunt 2026 - SDMCET',
       status: 'idle',
+      campusMapBounds: JSON.stringify([[15.4350, 75.0260], [15.4420, 75.0340]]),
     },
   });
 
-  // Create zones
+  // Clear existing zones before seeding
+  await prisma.mapZone.deleteMany({ where: { gameId: game.id } });
+
+  // Create zones around SDMCET campus (Dharwad, Karnataka)
   await prisma.mapZone.createMany({
     data: [
       {
         gameId: game.id,
         kind: 'play',
-        label: 'Main Campus',
+        label: 'SDMCET Campus Boundary',
         geoJson: JSON.stringify({
           type: 'Polygon',
-          coordinates: [[[77.59, 12.97], [77.60, 12.97], [77.60, 12.98], [77.59, 12.98], [77.59, 12.97]]],
+          coordinates: [
+            [
+              [75.0265, 15.4360],
+              [75.0335, 15.4360],
+              [75.0335, 15.4415],
+              [75.0265, 15.4415],
+              [75.0265, 15.4360],
+            ],
+          ],
         }),
         active: true,
       },
       {
         gameId: game.id,
         kind: 'restricted',
-        label: 'Construction Zone',
+        label: 'Substation & Electrical Yard',
         geoJson: JSON.stringify({
           type: 'Polygon',
-          coordinates: [[[77.591, 12.971], [77.592, 12.971], [77.592, 12.972], [77.591, 12.972], [77.591, 12.971]]],
+          coordinates: [
+            [
+              [75.0315, 15.4370],
+              [75.0325, 15.4370],
+              [75.0325, 15.4378],
+              [75.0315, 15.4378],
+              [75.0315, 15.4370],
+            ],
+          ],
         }),
         penaltyMins: 5,
         active: true,
       },
     ],
-    skipDuplicates: true,
   });
 
-  // Create levels
+  // Create levels with real SDMCET campus GPS drop coordinates
   const level1 = await prisma.level.upsert({
     where: { id: 1 },
-    update: {},
+    update: {
+      targetLat: 15.4294,
+      targetLng: 75.0135,
+      triggerRadiusMeters: 25,
+    },
     create: {
       id: 1,
       gameId: game.id,
@@ -59,8 +84,11 @@ async function main() {
       title: 'The Digital Footprint',
       clueText:
         'This person loves open-source contributions and has committed to a project about campus life. Their username is a play on the word "anonymous".',
-      locationHint: 'Start near the main library entrance.',
+      locationHint: 'Start near the main library / administration block entrance.',
       answer: 'anonymous',
+      targetLat: 15.4294,
+      targetLng: 75.0135,
+      triggerRadiusMeters: 25,
       durationSecs: 1800,
       isFinal: false,
       socialLinks: {
@@ -81,7 +109,11 @@ async function main() {
 
   const level2 = await prisma.level.upsert({
     where: { id: 2 },
-    update: {},
+    update: {
+      targetLat: 15.4282,
+      targetLng: 75.0152,
+      triggerRadiusMeters: 25,
+    },
     create: {
       id: 2,
       gameId: game.id,
@@ -89,8 +121,11 @@ async function main() {
       title: 'The Social Trail',
       clueText:
         'Find someone who posted a photo at the campus canteen last Tuesday. Their Instagram bio mentions their department.',
-      locationHint: 'Head towards the science block.',
+      locationHint: 'Head towards the science block / canteen lawn.',
       answer: 'canteen',
+      targetLat: 15.4282,
+      targetLng: 75.0152,
+      triggerRadiusMeters: 25,
       durationSecs: 1200,
       isFinal: false,
       socialLinks: {
@@ -119,16 +154,23 @@ async function main() {
 
   await prisma.level.upsert({
     where: { id: 3 },
-    update: {},
+    update: {
+      targetLat: 15.4272,
+      targetLng: 75.0146,
+      triggerRadiusMeters: 30,
+    },
     create: {
       id: 3,
       gameId: game.id,
       orderIndex: 3,
-      title: 'Face to Face',
+      title: 'Face to Face — The Grand Finale',
       clueText:
-        'You have gathered enough clues. Find the target person and take a live photo together. Good luck!',
-      locationHint: 'They were last seen near the amphitheatre.',
-      answer: '',
+        'You have unlocked all previous clues! Find the target person near the amphitheatre. Take a photo with them on your phone camera, then sprint to the Start Venue and present your photo to the event coordinators for instant victory verification!',
+      locationHint: 'Amphitheatre grounds — then race to Start Venue!',
+      answer: 'victory',
+      targetLat: 15.4272,
+      targetLng: 75.0146,
+      triggerRadiusMeters: 30,
       isFinal: true,
       hints: { create: [] },
     },

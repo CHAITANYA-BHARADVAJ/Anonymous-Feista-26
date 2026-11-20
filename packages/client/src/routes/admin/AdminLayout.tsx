@@ -4,9 +4,9 @@ import { api } from '../../lib/api';
 import { disconnectSocket } from '../../lib/socket';
 
 const NAV = [
-  { to: 'game', label: '🎮 Game' },
-  { to: 'levels', label: '📋 Levels' },
-  { to: 'photos', label: '📸 Photos' },
+  { to: 'game', label: '🎮 Live Operations' },
+  { to: 'teams', label: '👥 Teams & Registration' },
+  { to: 'levels', label: '🗺 Map & Clues Builder' },
 ];
 
 export default function AdminLayout() {
@@ -24,7 +24,13 @@ export default function AdminLayout() {
     <div className="flex flex-col h-full">
       {/* Top bar */}
       <header className="flex items-center justify-between px-4 py-3 bg-gray-900 border-b border-gray-800">
-        <h1 className="text-lg font-bold text-brand-400">🎯 Campus Hunt Admin</h1>
+        <div className="flex items-center gap-3">
+          <img src="/logo.png" alt="Anonymous SDMCET" className="w-7 h-7 object-contain rounded-lg border border-white/10" />
+          <h1 className="text-lg font-bold text-brand-400">Campus Hunt Admin</h1>
+          <span className="hidden sm:inline-block text-[11px] font-mono text-gray-400 border-l border-gray-800 pl-3">
+            Designed and developed by Anonymous_SDMCET
+          </span>
+        </div>
         <button onClick={logout} className="text-sm text-gray-400 hover:text-white px-3 py-1 rounded-lg min-h-[44px]">
           Sign Out
         </button>

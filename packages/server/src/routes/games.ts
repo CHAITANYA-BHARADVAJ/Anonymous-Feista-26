@@ -29,15 +29,25 @@ router.get('/:id', requireAuth('admin'), async (req, res) => {
 
 router.patch('/:id/status', requireAuth('admin'), async (req, res) => {
   const gameId = Number(req.params.id);
-  const { action } = req.body as { action: 'start' | 'pause' | 'resume' | 'end' };
+  const { action } = req.body as { action: 'start' | 'pause' | 'resume' | 'end' | 'reset' };
 
   const game = await prisma.game.findUnique({ where: { id: gameId } });
   if (!game) { res.status(404).json({ error: 'Not found' }); return; }
 
   let update: Parameters<typeof prisma.game.update>[0]['data'] = {};
 
-  if (action === 'start' && game.status === 'idle') {
-    update = { status: 'running', startedAt: new Date() };
+  if (action === 'start') {
+    // If game was ended, clean up prior completion timestamps for a fresh run
+    if (game.status === 'ended') {
+      await prisma.team.updateMany({ data: { finishedAt: null } });
+      await prisma.hintReveal.deleteMany({});
+      await prisma.teamLevelProgress.deleteMany({});
+      await prisma.teamLocation.deleteMany({});
+      await prisma.sosAlert.deleteMany({});
+      await prisma.penalty.deleteMany({});
+    }
+
+    update = { status: 'running', startedAt: new Date(), endedAt: null, pausedAt: null, totalPausedMs: 0 };
     // Unlock level 1 for all teams
     const teams = await prisma.team.findMany();
     const level1 = await prisma.level.findFirst({ where: { gameId, orderIndex: 1 } });
@@ -45,19 +55,27 @@ router.patch('/:id/status', requireAuth('admin'), async (req, res) => {
       for (const team of teams) {
         await prisma.teamLevelProgress.upsert({
           where: { teamId_levelId: { teamId: team.id, levelId: level1.id } },
-          update: {},
+          update: { completedAt: null, completedBy: null, locationReachedAt: null, unlockedAt: new Date() },
           create: { teamId: team.id, levelId: level1.id, unlockedAt: new Date() },
         });
       }
     }
   } else if (action === 'pause' && game.status === 'running') {
     update = { status: 'paused', pausedAt: new Date() };
-  } else if (action === 'resume' && game.status === 'paused' && game.pausedAt) {
-    const extra = Date.now() - game.pausedAt.getTime();
+  } else if (action === 'resume' && game.status === 'paused') {
+    const extra = game.pausedAt ? Date.now() - game.pausedAt.getTime() : 0;
     update = { status: 'running', pausedAt: null, totalPausedMs: game.totalPausedMs + extra };
     await rescheduleTimers(io);
   } else if (action === 'end') {
     update = { status: 'ended', endedAt: new Date() };
+  } else if (action === 'reset') {
+    update = { status: 'idle', startedAt: null, pausedAt: null, endedAt: null, totalPausedMs: 0 };
+    await prisma.team.updateMany({ data: { finishedAt: null } });
+    await prisma.hintReveal.deleteMany({});
+    await prisma.teamLevelProgress.deleteMany({});
+    await prisma.teamLocation.deleteMany({});
+    await prisma.sosAlert.deleteMany({});
+    await prisma.penalty.deleteMany({});
   } else {
     res.status(400).json({ error: `Invalid action "${action}" for status "${game.status}"` });
     return;
@@ -68,7 +86,12 @@ router.patch('/:id/status', requireAuth('admin'), async (req, res) => {
     status: updated.status,
     startedAt: updated.startedAt,
     pausedAt: updated.pausedAt,
+    endedAt: updated.endedAt,
   });
+
+  const rankings = await buildLeaderboard();
+  io.to(`game:${gameId}`).emit('leaderboard:updated', { rankings });
+
   res.json(updated);
 });
 

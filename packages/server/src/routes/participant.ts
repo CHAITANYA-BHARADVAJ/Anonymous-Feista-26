@@ -1,12 +1,23 @@
 import { Router } from 'express';
 import { prisma } from '../lib/prisma';
 import { requireAuth, AuthRequest } from '../middleware/auth';
-import { photoUpload } from '../middleware/upload';
 import { io } from '../index';
 import { scheduleTeamLevelTimer } from '../services/timerService';
 import { buildLeaderboard } from '../services/scoreService';
 
 const router = Router();
+
+function getDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371e3; // Earth's radius in meters
+  const toRad = (x: number) => (x * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
 
 // Get current game state for participant
 router.get('/game', requireAuth('team'), async (req: AuthRequest, res) => {
@@ -35,6 +46,63 @@ router.get('/game', requireAuth('team'), async (req: AuthRequest, res) => {
   res.json({ game, progress });
 });
 
+// Check GPS location and trigger clue drop
+router.post('/levels/:id/reach-location', requireAuth('team'), async (req: AuthRequest, res) => {
+  const teamId = req.user!.sub;
+  const levelId = Number(req.params.id);
+  const { lat, lng } = req.body as { lat?: number; lng?: number };
+
+  const level = await prisma.level.findUnique({ where: { id: levelId } });
+  if (!level) { res.status(404).json({ error: 'Level not found' }); return; }
+
+  const progress = await prisma.teamLevelProgress.findUnique({
+    where: { teamId_levelId: { teamId, levelId } },
+  });
+  if (!progress) { res.status(400).json({ error: 'Level not unlocked' }); return; }
+
+  let distanceMeters = 0;
+  const radius = (level.triggerRadiusMeters ?? 20) + 10; // 10m buffer for GPS jitter
+
+  if (level.targetLat != null && level.targetLng != null) {
+    if (lat == null || lng == null) {
+      res.status(400).json({ error: 'Device GPS coordinates required' });
+      return;
+    }
+    distanceMeters = getDistanceMeters(lat, lng, level.targetLat, level.targetLng);
+    if (distanceMeters > radius) {
+      res.status(400).json({
+        error: `You are ${Math.round(distanceMeters)}m away. Move within ${level.triggerRadiusMeters ?? 20}m to unlock this clue!`,
+        distanceMeters: Math.round(distanceMeters),
+        triggerRadius: level.triggerRadiusMeters ?? 20,
+      });
+      return;
+    }
+  }
+
+  const updatedProgress = await prisma.teamLevelProgress.update({
+    where: { id: progress.id },
+    data: { locationReachedAt: progress.locationReachedAt ?? new Date() },
+  });
+
+  const team = await prisma.team.findUnique({ where: { id: teamId } });
+  io.to('admin').emit('team:checkpoint_reached', {
+    teamId,
+    teamName: team?.name,
+    levelId,
+    levelTitle: level.title,
+    orderIndex: level.orderIndex,
+    reachedAt: updatedProgress.locationReachedAt,
+  });
+
+  res.json({
+    reached: true,
+    distanceMeters: Math.round(distanceMeters),
+    levelTitle: level.title,
+    clueText: level.clueText,
+    locationHint: level.locationHint,
+  });
+});
+
 // Submit level answer
 router.post('/levels/:id/answer', requireAuth('team'), async (req: AuthRequest, res) => {
   const teamId = req.user!.sub;
@@ -44,16 +112,17 @@ router.post('/levels/:id/answer', requireAuth('team'), async (req: AuthRequest, 
   const level = await prisma.level.findUnique({ where: { id: levelId } });
   if (!level) { res.status(404).json({ error: 'Level not found' }); return; }
 
-  if (level.isFinal) { res.status(400).json({ error: 'Final level uses photo submission' }); return; }
-
   const progress = await prisma.teamLevelProgress.findUnique({
     where: { teamId_levelId: { teamId, levelId } },
   });
   if (!progress) { res.status(400).json({ error: 'Level not unlocked' }); return; }
   if (progress.completedAt) { res.status(400).json({ error: 'Level already completed' }); return; }
 
-  const correct = answer.trim().toLowerCase() === level.answer.trim().toLowerCase();
-  if (!correct) { res.status(422).json({ error: 'Incorrect answer', correct: false }); return; }
+  // If level requires answer verification
+  if (level.answer && level.answer.trim()) {
+    const correct = answer?.trim().toLowerCase() === level.answer.trim().toLowerCase();
+    if (!correct) { res.status(422).json({ error: 'Incorrect answer', correct: false }); return; }
+  }
 
   const game = await prisma.game.findFirst({ orderBy: { id: 'desc' } });
 
@@ -190,30 +259,6 @@ router.post('/sos', requireAuth('team'), async (req: AuthRequest, res) => {
   });
 
   res.json({ ok: true });
-});
-
-// Final photo upload
-router.post('/final-photo', requireAuth('team'), photoUpload.single('photo'), async (req: AuthRequest, res) => {
-  const teamId = req.user!.sub;
-  if (!req.file) { res.status(400).json({ error: 'No file uploaded' }); return; }
-
-  // Check a pending photo doesn't already exist
-  const pending = await prisma.photo.findFirst({ where: { teamId, status: 'pending' } });
-  if (pending) { res.status(400).json({ error: 'Submission already pending review' }); return; }
-
-  const photo = await prisma.photo.create({
-    data: { teamId, filePath: req.file.path, submittedAt: new Date() },
-  });
-
-  const team = await prisma.team.findUnique({ where: { id: teamId } });
-  io.to('admin').emit('photo:new_submission', {
-    photoId: photo.id,
-    teamId,
-    teamName: team?.name,
-    submittedAt: photo.submittedAt,
-  });
-
-  res.status(201).json({ photoId: photo.id, status: 'pending' });
 });
 
 export default router;

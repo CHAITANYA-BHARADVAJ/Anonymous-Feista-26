@@ -4,6 +4,7 @@ export interface LevelProgress {
   id: number;
   levelId: number;
   unlockedAt: string;
+  locationReachedAt: string | null;
   completedAt: string | null;
   hintsUsed: number;
   hintReveals: { hintId: number }[];
@@ -14,6 +15,9 @@ export interface LevelProgress {
     clueText: string;
     locationHint: string;
     answer: string;
+    targetLat: number | null;
+    targetLng: number | null;
+    triggerRadiusMeters: number | null;
     durationSecs: number | null;
     isFinal: boolean;
     mapOverlayGeoJson: string | null;
@@ -30,6 +34,8 @@ export interface GameState {
   startedAt: string | null;
   pausedAt: string | null;
   totalPausedMs: number;
+  campusMapUrl?: string | null;
+  campusMapBounds?: string | null;
   zones: any[];
 }
 

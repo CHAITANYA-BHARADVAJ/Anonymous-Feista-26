@@ -7,7 +7,7 @@ import { api } from '../lib/api';
 export function useSocket() {
   const token = useAuthStore((s) => s.token);
   const role = useAuthStore((s) => s.role);
-  const { setGame, setProgress, setRankings, addAnnouncement, setConnected, game } = useGameStore();
+  const { setGame, setProgress, setRankings, addAnnouncement, setConnected } = useGameStore();
 
   useEffect(() => {
     const socket = getSocket(token ?? undefined);
@@ -31,7 +31,8 @@ export function useSocket() {
     socket.on('disconnect', () => setConnected(false));
 
     socket.on('game:status_changed', (data: any) => {
-      setGame({ ...game!, ...data });
+      const current = useGameStore.getState().game;
+      if (current) setGame({ ...current, ...data });
     });
 
     socket.on('game:announcement', (data: any) => {

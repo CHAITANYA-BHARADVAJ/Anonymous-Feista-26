@@ -17,7 +17,13 @@ router.get('/game/:gameId', requireAuth('admin'), async (req, res) => {
 
 // Create level
 router.post('/game/:gameId', requireAuth('admin'), async (req, res) => {
-  const data = req.body;
+  const data = { ...req.body };
+  if ('targetLat' in data) data.targetLat = data.targetLat !== '' && data.targetLat != null ? Number(data.targetLat) : null;
+  if ('targetLng' in data) data.targetLng = data.targetLng !== '' && data.targetLng != null ? Number(data.targetLng) : null;
+  if ('triggerRadiusMeters' in data) data.triggerRadiusMeters = data.triggerRadiusMeters != null ? Number(data.triggerRadiusMeters) : 20;
+  if ('orderIndex' in data) data.orderIndex = Number(data.orderIndex);
+  if ('durationSecs' in data) data.durationSecs = data.durationSecs ? Number(data.durationSecs) : null;
+
   const level = await prisma.level.create({
     data: { ...data, gameId: Number(req.params.gameId) },
   });
@@ -26,9 +32,31 @@ router.post('/game/:gameId', requireAuth('admin'), async (req, res) => {
 
 // Update level
 router.put('/:id', requireAuth('admin'), async (req, res) => {
+  const data = { ...req.body };
+  if ('targetLat' in data) data.targetLat = data.targetLat !== '' && data.targetLat != null ? Number(data.targetLat) : null;
+  if ('targetLng' in data) data.targetLng = data.targetLng !== '' && data.targetLng != null ? Number(data.targetLng) : null;
+  if ('triggerRadiusMeters' in data) data.triggerRadiusMeters = data.triggerRadiusMeters != null ? Number(data.triggerRadiusMeters) : 20;
+  if ('orderIndex' in data) data.orderIndex = Number(data.orderIndex);
+  if ('durationSecs' in data) data.durationSecs = data.durationSecs ? Number(data.durationSecs) : null;
+
   const level = await prisma.level.update({
     where: { id: Number(req.params.id) },
-    data: req.body,
+    data,
+  });
+  res.json(level);
+});
+
+router.patch('/:id', requireAuth('admin'), async (req, res) => {
+  const data = { ...req.body };
+  if ('targetLat' in data) data.targetLat = data.targetLat !== '' && data.targetLat != null ? Number(data.targetLat) : null;
+  if ('targetLng' in data) data.targetLng = data.targetLng !== '' && data.targetLng != null ? Number(data.targetLng) : null;
+  if ('triggerRadiusMeters' in data) data.triggerRadiusMeters = data.triggerRadiusMeters != null ? Number(data.triggerRadiusMeters) : 20;
+  if ('orderIndex' in data) data.orderIndex = Number(data.orderIndex);
+  if ('durationSecs' in data) data.durationSecs = data.durationSecs ? Number(data.durationSecs) : null;
+
+  const level = await prisma.level.update({
+    where: { id: Number(req.params.id) },
+    data,
   });
   res.json(level);
 });

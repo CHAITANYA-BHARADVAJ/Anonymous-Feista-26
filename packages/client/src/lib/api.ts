@@ -29,6 +29,11 @@ export const api = {
 
   // Participant
   getParticipantGame: () => request<any>('/participant/game'),
+  reachLocation: (levelId: number, lat: number, lng: number) =>
+    request<any>(`/participant/levels/${levelId}/reach-location`, {
+      method: 'POST',
+      body: JSON.stringify({ lat, lng }),
+    }),
   submitAnswer: (levelId: number, answer: string) =>
     request<any>(`/participant/levels/${levelId}/answer`, {
       method: 'POST',
@@ -46,25 +51,25 @@ export const api = {
     }),
   sendSOS: (lat: number, lng: number) =>
     request('/participant/sos', { method: 'POST', body: JSON.stringify({ lat, lng }) }),
-  uploadPhoto: (file: File) => {
-    const fd = new FormData();
-    fd.append('photo', file);
-    return fetch(`${BASE}/participant/final-photo`, {
-      method: 'POST',
-      credentials: 'include',
-      body: fd,
-    }).then((r) => r.json());
-  },
 
   // Leaderboard (public)
   getLeaderboard: () => request<{ rankings: any[] }>('/leaderboard'),
   getSpectatorState: () => request<any>('/leaderboard/spectator/state'),
 
-  // Admin
+  // Admin Operations & Emergency Failsafes
   getAdminTeams: () => request<any[]>('/admin/teams'),
-  getPhotos: () => request<any[]>('/admin/photos'),
-  reviewPhoto: (id: number, status: 'approved' | 'rejected', reviewNote?: string) =>
-    request(`/admin/photos/${id}`, { method: 'PATCH', body: JSON.stringify({ status, reviewNote }) }),
+  createTeam: (name: string, code: string) =>
+    request<any>('/admin/teams', { method: 'POST', body: JSON.stringify({ name, code }) }),
+  deleteTeam: (teamId: number) =>
+    request<any>(`/admin/teams/${teamId}`, { method: 'DELETE' }),
+  resetTeamProgress: (teamId: number) =>
+    request<any>(`/admin/teams/${teamId}/reset`, { method: 'POST' }),
+  verifyTeamFinish: (teamId: number) =>
+    request<any>(`/admin/teams/${teamId}/verify-finish`, { method: 'POST' }),
+  forceUnlockLevel: (teamId: number) =>
+    request<any>(`/admin/teams/${teamId}/force-unlock`, { method: 'POST' }),
+  forceCompleteLevel: (teamId: number) =>
+    request<any>(`/admin/teams/${teamId}/force-complete`, { method: 'POST' }),
   getSosAlerts: () => request<any[]>('/admin/sos'),
   getGames: () => request<any[]>('/games'),
   patchGameStatus: (id: number, action: string) =>
@@ -74,6 +79,17 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ message, kind, targetTeamId }),
     }),
+  getLevels: (gameId: number) => request<any[]>(`/levels/game/${gameId}`),
+  createLevel: (gameId: number, data: any) =>
+    request<any>(`/levels/game/${gameId}`, { method: 'POST', body: JSON.stringify(data) }),
+  updateLevel: (id: number, data: any) =>
+    request<any>(`/levels/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteLevel: (id: number) => request<any>(`/levels/${id}`, { method: 'DELETE' }),
   getZones: (gameId: number) => request<any[]>(`/zones/game/${gameId}`),
+  createZone: (gameId: number, data: any) =>
+    request<any>(`/zones/game/${gameId}`, { method: 'POST', body: JSON.stringify(data) }),
   toggleZone: (zoneId: number) => request(`/zones/${zoneId}/toggle`, { method: 'PATCH' }),
+  deleteZone: (zoneId: number) => request(`/zones/${zoneId}`, { method: 'DELETE' }),
+  updateMapSettings: (data: { campusMapUrl?: string; campusMapBounds?: string }) =>
+    request<any>('/admin/map-settings', { method: 'PATCH', body: JSON.stringify(data) }),
 };

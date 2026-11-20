@@ -1,8 +1,12 @@
 node_modules/
 dist/
 .env
-packages/server/dev.db
-packages/server/dev.db-journal
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+packages/server/dev.db*
+packages/server/prisma/dev.db*
 packages/server/uploads/
 packages/client/.vite/
 *.tsbuildinfo

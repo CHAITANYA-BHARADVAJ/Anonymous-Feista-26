@@ -3,9 +3,19 @@ import { verifyToken } from '../lib/jwt';
 import { prisma } from '../lib/prisma';
 import { handleLocationUpdate } from '../services/zoneService';
 
+function parseCookie(cookieHeader: string | undefined, key: string): string | undefined {
+  if (!cookieHeader) return undefined;
+  const match = cookieHeader.match(new RegExp(`(?:^|;\\s*)${key}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
 export function registerSocketHandlers(io: Server) {
   io.use(async (socket, next) => {
-    const token = socket.handshake.auth?.token as string | undefined;
+    // Try auth token from handshake auth first, then fall back to cookie
+    let token = socket.handshake.auth?.token as string | undefined;
+    if (!token) {
+      token = parseCookie(socket.handshake.headers.cookie, 'ch_token');
+    }
     if (!token) {
       // Allow spectator connections without auth
       socket.data.role = 'spectator';

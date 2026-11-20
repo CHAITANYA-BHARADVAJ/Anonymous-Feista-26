@@ -8,10 +8,11 @@ datasource db {
 }
 
 model Team {
-  id        Int      @id @default(autoincrement())
-  name      String   @unique
+  id        Int       @id @default(autoincrement())
+  name      String    @unique
   code      String
-  createdAt DateTime @default(now())
+  finishedAt DateTime?
+  createdAt DateTime  @default(now())
 
   sessions      TeamSession[]
   levelProgress TeamLevelProgress[]
@@ -33,13 +34,15 @@ model TeamSession {
 }
 
 model Game {
-  id            Int       @id @default(autoincrement())
-  name          String
-  status        String    @default("idle")
-  startedAt     DateTime?
-  pausedAt      DateTime?
-  totalPausedMs Int       @default(0)
-  endedAt       DateTime?
+  id              Int       @id @default(autoincrement())
+  name            String
+  status          String    @default("idle")
+  campusMapUrl    String?
+  campusMapBounds String?
+  startedAt       DateTime?
+  pausedAt        DateTime?
+  totalPausedMs   Int       @default(0)
+  endedAt         DateTime?
 
   levels        Level[]
   zones         MapZone[]
@@ -47,16 +50,19 @@ model Game {
 }
 
 model Level {
-  id                 Int     @id @default(autoincrement())
-  gameId             Int
-  orderIndex         Int
-  title              String
-  clueText           String
-  locationHint       String
-  answer             String
-  durationSecs       Int?
-  isFinal            Boolean @default(false)
-  mapOverlayGeoJson  String?
+  id                  Int     @id @default(autoincrement())
+  gameId              Int
+  orderIndex          Int
+  title               String
+  clueText            String
+  locationHint        String
+  answer              String
+  durationSecs        Int?
+  isFinal             Boolean @default(false)
+  targetLat           Float?
+  targetLng           Float?
+  triggerRadiusMeters Int?    @default(20)
+  mapOverlayGeoJson   String?
 
   game         Game                @relation(fields: [gameId], references: [id])
   socialLinks  SocialLink[]
@@ -100,13 +106,14 @@ model Checkpoint {
 }
 
 model TeamLevelProgress {
-  id          Int       @id @default(autoincrement())
-  teamId      Int
-  levelId     Int
-  unlockedAt  DateTime
-  completedAt DateTime?
-  completedBy String?
-  hintsUsed   Int       @default(0)
+  id                Int       @id @default(autoincrement())
+  teamId            Int
+  levelId           Int
+  unlockedAt        DateTime
+  locationReachedAt DateTime?
+  completedAt       DateTime?
+  completedBy       String?
+  hintsUsed         Int       @default(0)
 
   team        Team       @relation(fields: [teamId], references: [id])
   level       Level      @relation(fields: [levelId], references: [id])
