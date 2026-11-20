@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuthStore } from '../stores/authStore';
+import { requestFullscreen, enableAutoFullscreenOnFirstGesture } from '../lib/fullscreen';
 
 export default function AdminLogin() {
   const [username, setUsername] = useState('');
@@ -11,10 +12,16 @@ export default function AdminLogin() {
   const setAdmin = useAuthStore((s) => s.setAdmin);
   const navigate = useNavigate();
 
+  useEffect(() => {
+    const cleanup = enableAutoFullscreenOnFirstGesture();
+    return cleanup;
+  }, []);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
     setLoading(true);
+    requestFullscreen().catch(() => {});
     try {
       await api.adminLogin(username, password);
       setAdmin('');

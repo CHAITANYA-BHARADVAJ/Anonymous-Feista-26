@@ -1,7 +1,9 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
+import { useEffect } from 'react';
 import { useAuthStore } from '../../stores/authStore';
 import { api } from '../../lib/api';
 import { disconnectSocket } from '../../lib/socket';
+import { toggleFullscreen, enableAutoFullscreenOnFirstGesture } from '../../lib/fullscreen';
 
 const NAV = [
   { to: 'game', label: '🎮 Live Operations' },
@@ -12,6 +14,11 @@ const NAV = [
 export default function AdminLayout() {
   const clear = useAuthStore((s) => s.clear);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const cleanup = enableAutoFullscreenOnFirstGesture();
+    return cleanup;
+  }, []);
 
   async function logout() {
     await api.logout().catch(() => {});
@@ -31,9 +38,19 @@ export default function AdminLayout() {
             Designed and developed by Anonymous_SDMCET
           </span>
         </div>
-        <button onClick={logout} className="text-sm text-gray-400 hover:text-white px-3 py-1 rounded-lg min-h-[44px]">
-          Sign Out
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => toggleFullscreen()}
+            className="text-xs font-mono text-gray-400 hover:text-amber-300 px-2.5 py-1.5 rounded-lg border border-gray-800 hover:border-gray-700 bg-gray-950/50 flex items-center gap-1.5"
+            title="Toggle Fullscreen"
+          >
+            <span>⛶</span>
+            <span className="hidden sm:inline">Fullscreen</span>
+          </button>
+          <button onClick={logout} className="text-sm text-gray-400 hover:text-white px-3 py-1 rounded-lg min-h-[44px]">
+            Sign Out
+          </button>
+        </div>
       </header>
 
       {/* Tab nav */}

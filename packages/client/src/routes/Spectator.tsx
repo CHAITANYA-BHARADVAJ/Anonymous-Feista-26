@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { getSocket } from '../lib/socket';
 import { formatMs } from '../hooks/useCountdown';
+import { toggleFullscreen, enableAutoFullscreenOnFirstGesture } from '../lib/fullscreen';
 
 export default function Spectator() {
   const [state, setState] = useState<any>(null);
 
   useEffect(() => {
+    const cleanupFs = enableAutoFullscreenOnFirstGesture();
     api.getSpectatorState().then(setState);
     const socket = getSocket();
     socket.emit('join:spectator');
@@ -20,6 +22,7 @@ export default function Spectator() {
       setState((s: any) => (s ? { ...s, announcements: [a, ...(s.announcements ?? [])].slice(0, 5) } : s)),
     );
     return () => {
+      cleanupFs();
       socket.off('leaderboard:updated');
       socket.off('game:status_changed');
       socket.off('game:announcement');
@@ -50,6 +53,15 @@ export default function Spectator() {
     <div className="min-h-screen bg-graphite-950 text-gray-100 p-8 lg:p-12 flex flex-col gap-8 max-w-6xl mx-auto select-none">
       {/* Big Screen Header */}
       <header className="flex flex-col items-center justify-center text-center gap-2 relative">
+        <button
+          onClick={() => toggleFullscreen()}
+          className="absolute right-0 top-0 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-mono text-gray-300 flex items-center gap-1.5 transition-all active:scale-95"
+          title="Toggle Fullscreen Projection"
+        >
+          <span>⛶</span>
+          <span>Fullscreen</span>
+        </button>
+
         <div className="w-14 h-14 rounded-2xl bg-white/5 border border-white/10 p-2 flex items-center justify-center shadow-xl mb-1">
           <img src="/logo.png" alt="Anonymous SDMCET" className="w-full h-full object-contain filter drop-shadow" />
         </div>

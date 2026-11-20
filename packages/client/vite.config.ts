@@ -12,9 +12,10 @@ export default defineConfig({
         name: 'Campus Hunt',
         short_name: 'CampusHunt',
         description: 'Live campus OSINT hunt game',
-        theme_color: '#1e1b4b',
-        background_color: '#0f0f0f',
-        display: 'standalone',
+        theme_color: '#07080b',
+        background_color: '#07080b',
+        display: 'fullscreen',
+        display_override: ['fullscreen', 'standalone', 'minimal-ui'],
         orientation: 'portrait',
         start_url: '/',
         icons: [

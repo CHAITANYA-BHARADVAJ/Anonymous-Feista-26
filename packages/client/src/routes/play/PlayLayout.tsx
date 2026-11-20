@@ -1,9 +1,11 @@
 import { Outlet, NavLink } from 'react-router-dom';
+import { useState, useEffect } from 'react';
 import { useGameStore } from '../../stores/gameStore';
 import { api } from '../../lib/api';
 import ZoneWarning from '../../components/ZoneWarning';
 import AnnouncementBanner from '../../components/AnnouncementBanner';
 import { MissionIcon, IntelIcon, RadarIcon, RanksIcon, TeamIcon } from '../../components/Icons';
+import { requestFullscreen, isFullscreen, toggleFullscreen, enableAutoFullscreenOnFirstGesture } from '../../lib/fullscreen';
 
 const NAV = [
   { to: 'home', label: 'Briefing', icon: MissionIcon },
@@ -16,6 +18,24 @@ const NAV = [
 export default function PlayLayout() {
   const connected = useGameStore((s) => s.connected);
   const game = useGameStore((s) => s.game);
+  const [fullscreenActive, setFullscreenActive] = useState(false);
+
+  useEffect(() => {
+    // Attempt auto fullscreen on the very first screen interaction
+    const cleanup = enableAutoFullscreenOnFirstGesture();
+
+    const updateFs = () => setFullscreenActive(isFullscreen());
+    updateFs();
+
+    document.addEventListener('fullscreenchange', updateFs);
+    document.addEventListener('webkitfullscreenchange', updateFs);
+
+    return () => {
+      cleanup();
+      document.removeEventListener('fullscreenchange', updateFs);
+      document.removeEventListener('webkitfullscreenchange', updateFs);
+    };
+  }, []);
 
   async function handleSOS() {
     if (!confirm('DISPATCH EMERGENCY SOS TO FIELD COORDINATORS?\nYour exact GPS coordinates and timestamp will be transmitted to the command desk.')) return;
@@ -33,6 +53,20 @@ export default function PlayLayout() {
           <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
           <span className="uppercase tracking-wider">Telemetry Stream Reconnecting…</span>
         </div>
+      )}
+
+      {/* Floating Tactical Fullscreen Re-engage Button (when not in fullscreen) */}
+      {!fullscreenActive && (
+        <button
+          onClick={() => toggleFullscreen()}
+          className="fixed top-2.5 right-2.5 z-50 px-2.5 py-1.5 rounded-xl bg-cyan-950/80 border border-cyan-400/40 text-cyan-300 text-[10px] font-mono uppercase tracking-wider flex items-center gap-1.5 backdrop-blur-md shadow-lg active:scale-95 transition-all"
+          title="Engage Fullscreen Mode"
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+          </svg>
+          <span>HUD ⛶</span>
+        </button>
       )}
 
       <AnnouncementBanner />
@@ -59,6 +93,7 @@ export default function PlayLayout() {
           <NavLink
             key={to}
             to={to}
+            onClick={() => requestFullscreen().catch(() => {})}
             className={({ isActive }) =>
               `flex-1 flex flex-col items-center justify-center py-2 px-1 min-h-[54px] rounded-xl transition-all relative ${
                 isActive
