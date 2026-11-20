@@ -46,7 +46,6 @@ COPY packages/server/package*.json ./packages/server/
 
 # Copy dependencies and generated prisma client
 COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/packages/server/node_modules ./packages/server/node_modules
 
 # Copy compiled artifacts
 COPY --from=builder /app/packages/server/dist ./packages/server/dist
