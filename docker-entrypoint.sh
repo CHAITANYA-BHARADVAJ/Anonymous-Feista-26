@@ -5,16 +5,18 @@ echo "=================================================="
 echo "🎯 ANONYMOUS SDMCET CAMPUS HUNT 2026 — DOCKER BOOT"
 echo "=================================================="
 
-# Ensure database directory exists
-mkdir -p /app/packages/server/prisma
+# Ensure data and uploads directories exist
+mkdir -p /data
 mkdir -p /app/packages/server/uploads
 
 SCHEMA_PATH="/app/packages/server/prisma/schema.prisma"
-DB_FILE="/app/packages/server/prisma/dev.db"
+export DATABASE_URL="${DATABASE_URL:-file:/data/dev.db}"
 
-# Apply Prisma migrations or push schema
+echo "📦 Database URL: $DATABASE_URL"
 echo "📦 Verifying Prisma database schema..."
-npx prisma migrate deploy --schema="$SCHEMA_PATH" 2>/dev/null || npx prisma db push --schema="$SCHEMA_PATH"
+
+# Push schema directly to database
+npx prisma db push --schema="$SCHEMA_PATH" --accept-data-loss
 
 # Check if database has any existing Game record
 COUNT=$(node -e '
@@ -29,8 +31,8 @@ echo "📊 Current active game count in database: $COUNT"
 
 if [ "$COUNT" = "0" ] || [ "${FORCE_SEED:-false}" = "true" ]; then
   echo "🌱 Seeding SDMCET landmarks, default clues, and demo teams..."
-  npx tsx /app/packages/server/prisma/seed.ts || echo "⚠️ Seed completed with notice."
+  npx tsx /app/packages/server/prisma/seed.ts || echo "⚠️ Seed completed."
 fi
 
-echo "🚀 Starting Node.js server on port ${PORT:-3001}..."
+echo "🚀 Starting Node.js server on port ${PORT:-3001} (0.0.0.0)..."
 exec node packages/server/dist/index.js

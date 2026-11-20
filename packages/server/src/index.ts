@@ -71,7 +71,7 @@ registerSocketHandlers(io);
 
 const PORT = Number(process.env.PORT ?? 3001);
 
-server.listen(PORT, async () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+server.listen(PORT, '0.0.0.0', async () => {
+  console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
   await rescheduleTimers(io);
 });

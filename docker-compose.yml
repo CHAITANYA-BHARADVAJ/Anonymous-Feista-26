@@ -10,13 +10,13 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3001
-      - DATABASE_URL=file:/app/packages/server/prisma/dev.db
+      - DATABASE_URL=file:/data/dev.db
       - JWT_SECRET=${JWT_SECRET:-tactical_sdmcet_secret_key_2026_change_me}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
       - CLIENT_URL=https://${DOMAIN:-localhost}
       - FORCE_SEED=${FORCE_SEED:-false}
     volumes:
-      - ./data:/app/packages/server/prisma
+      - ./data:/data
       - ./uploads:/app/packages/server/uploads
     expose:
       - "3001"
