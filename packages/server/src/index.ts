@@ -4,6 +4,7 @@ import http from 'http';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import path from 'path';
+import fs from 'fs';
 import { Server } from 'socket.io';
 import { prisma } from './lib/prisma';
 import { registerSocketHandlers } from './socket';
@@ -21,13 +22,21 @@ import adminRouter from './routes/admin';
 const app = express();
 const server = http.createServer(app);
 
-const CLIENT_URL = process.env.CLIENT_URL ?? 'http://localhost:5173';
+const CLIENT_URL = process.env.CLIENT_URL;
 
 export const io = new Server(server, {
-  cors: { origin: CLIENT_URL, credentials: true },
+  cors: {
+    origin: CLIENT_URL ? [CLIENT_URL, 'http://localhost:5173'] : true,
+    credentials: true,
+  },
 });
 
-app.use(cors({ origin: CLIENT_URL, credentials: true }));
+app.use(
+  cors({
+    origin: CLIENT_URL ? [CLIENT_URL, 'http://localhost:5173'] : true,
+    credentials: true,
+  }),
+);
 app.use(express.json());
 app.use(cookieParser());
 
@@ -44,6 +53,19 @@ app.use('/api/v1/leaderboard', leaderboardRouter);
 app.use('/api/v1/admin', adminRouter);
 
 app.get('/api/v1/health', (_req, res) => res.json({ ok: true }));
+
+// Serve built React PWA client in production
+const clientDist = path.resolve(__dirname, '../../client/dist');
+if (fs.existsSync(clientDist)) {
+  console.log(`📦 Serving production client assets from: ${clientDist}`);
+  app.use(express.static(clientDist));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/uploads') || req.path.startsWith('/socket.io')) {
+      return next();
+    }
+    res.sendFile(path.join(clientDist, 'index.html'));
+  });
+}
 
 registerSocketHandlers(io);
 

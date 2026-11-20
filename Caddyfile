@@ -1,0 +1,25 @@
+{
+    # Global Caddy options
+    email {$ACME_EMAIL:admin@anonymoussdmcet.in}
+    admin off
+}
+
+# Dynamic domain from environment (e.g. 13.233.50.120.nip.io or hunt.yourdomain.com)
+{$DOMAIN:localhost} {
+    # High-performance compression for map tiles, vectors, and JS bundles
+    encode gzip zstd
+
+    # Health check passthrough
+    handle /api/v1/health {
+        reverse_proxy app:3001
+    }
+
+    # Reverse proxy to unified Node.js Express server
+    # Automatically proxies WebSockets (Socket.io) with HTTP/1.1 Upgrade headers
+    reverse_proxy app:3001 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+}

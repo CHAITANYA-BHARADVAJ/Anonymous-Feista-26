@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: campushunt_app
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - DATABASE_URL=file:/app/packages/server/prisma/dev.db
+      - JWT_SECRET=${JWT_SECRET:-tactical_sdmcet_secret_key_2026_change_me}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
+      - CLIENT_URL=https://${DOMAIN:-localhost}
+      - FORCE_SEED=${FORCE_SEED:-false}
+    volumes:
+      - ./data:/app/packages/server/prisma
+      - ./uploads:/app/packages/server/uploads
+    expose:
+      - "3001"
+    networks:
+      - hunt-net
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: campushunt_caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+      - ACME_EMAIL=${ACME_EMAIL:-admin@anonymoussdmcet.in}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+    networks:
+      - hunt-net
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+networks:
+  hunt-net:
+    driver: bridge
