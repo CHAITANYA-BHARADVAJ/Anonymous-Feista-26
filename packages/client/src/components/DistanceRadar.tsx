@@ -1,12 +1,19 @@
-import React from 'react';
-import { CompassArrowIcon, UnlockIcon, SignalIcon } from './Icons';
+import React, { useRef, useState, useEffect, useMemo } from 'react';
+import { UnlockIcon, SignalIcon } from './Icons';
+import {
+  useCompassHeading,
+  getCardinalDirection,
+  unwrapAngle,
+  getRelativeDirectionLabel,
+} from '../hooks/useCompassHeading';
 
 interface DistanceRadarProps {
   distanceMeters: number | null;
   triggerRadius: number;
   locationReached: boolean;
-  bearing?: number | null;
+  bearing?: number | null; // Azimuth from player to target (0-360 deg relative to True North)
   accuracy?: number | null;
+  gpsHeading?: number | null;
   onTriggerCheckIn?: () => void;
   isLoading?: boolean;
 }
@@ -17,23 +24,91 @@ export default function DistanceRadar({
   locationReached,
   bearing,
   accuracy,
+  gpsHeading,
   onTriggerCheckIn,
   isLoading,
 }: DistanceRadarProps) {
+  const dialRef = useRef<HTMLDivElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const unwrappedArrowAngleRef = useRef(0);
+
+  const {
+    heading,
+    rawSensorHeading,
+    isSensorActive,
+    manualOffset,
+    permissionGranted,
+    requestPermission,
+    setManualOffset,
+    resetToSensor,
+  } = useCompassHeading(gpsHeading);
+
+  // Calculate relative angle to target (where arrow points relative to top of device)
+  // arrowAngle = (bearing - heading) % 360
+  const rawArrowAngle = useMemo(() => {
+    if (bearing == null) return 0;
+    return (bearing - heading + 360) % 360;
+  }, [bearing, heading]);
+
+  // Compute smooth continuous unwrapped angle for CSS rotation to prevent jump glitches
+  const smoothArrowAngle = useMemo(() => {
+    const next = unwrapAngle(unwrappedArrowAngleRef.current, rawArrowAngle);
+    unwrappedArrowAngleRef.current = next;
+    return next;
+  }, [rawArrowAngle]);
+
+  // Handle interactive dial dragging / touch rotation
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setIsDragging(true);
+    requestPermission().catch(() => {});
+    updateHeadingFromPointer(e.clientX, e.clientY);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDragging && e.buttons === 0) return;
+    updateHeadingFromPointer(e.clientX, e.clientY);
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {}
+    setIsDragging(false);
+  };
+
+  const updateHeadingFromPointer = (clientX: number, clientY: number) => {
+    if (!dialRef.current) return;
+    const rect = dialRef.current.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const dx = clientX - centerX;
+    const dy = clientY - centerY;
+    // Calculate angle: 0 deg = North (top), 90 deg = East (right)
+    const pointerDeg = (Math.atan2(dy, dx) * (180 / Math.PI) + 90 + 360) % 360;
+
+    // Adjust manual offset so effective heading aligns with pointer angle
+    const base = rawSensorHeading ?? (gpsHeading && gpsHeading >= 0 ? gpsHeading : 0);
+    const newOffset = (pointerDeg - base + 360) % 360;
+    setManualOffset(newOffset);
+  };
+
   if (locationReached) {
     return (
       <div className="flex items-center justify-between py-1 px-1">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-mono text-sm font-black">
+          <div className="w-8 h-8 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-mono text-sm font-black shadow-inner">
             ✓
           </div>
           <div>
-            <p className="font-semibold text-xs tracking-tight text-white uppercase font-mono">Location Discovered</p>
+            <p className="font-semibold text-xs tracking-tight text-white uppercase font-mono">
+              Target Landmarked
+            </p>
             <p className="text-[11px] text-emerald-400/90 font-medium">Clue intelligence decrypted</p>
           </div>
         </div>
-        <span className="text-[10px] font-mono tracking-wider uppercase bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 px-3 py-1 rounded-lg">
-          Target Cleared
+        <span className="text-[10px] font-mono tracking-wider uppercase bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 px-3 py-1 rounded-lg font-bold">
+          Cleared
         </span>
       </div>
     );
@@ -41,7 +116,7 @@ export default function DistanceRadar({
 
   if (distanceMeters === null) {
     return (
-      <div className="flex items-center justify-center gap-3 py-2 text-xs text-gray-400 font-mono">
+      <div className="flex items-center justify-center gap-3 py-2 text-xs text-zinc-400 font-mono">
         <div className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
         <span className="tracking-wider uppercase text-[11px]">Acquiring Target Geofence…</span>
       </div>
@@ -67,7 +142,7 @@ export default function DistanceRadar({
     ? 'text-amber-400 border-amber-500/40 bg-amber-500/10'
     : isWarm
     ? 'text-cyan-300 border-cyan-500/30 bg-cyan-500/10'
-    : 'text-gray-400 border-white/10 bg-white/5';
+    : 'text-zinc-400 border-white/10 bg-white/5';
 
   const statusText = isBurning
     ? 'IN TARGET RANGE'
@@ -77,44 +152,125 @@ export default function DistanceRadar({
     ? 'APPROACHING SECTOR'
     : 'EXPLORING CAMPUS';
 
+  const relativeGuidance = bearing != null ? getRelativeDirectionLabel(rawArrowAngle) : null;
+  const cardinalText = bearing != null ? getCardinalDirection(bearing) : '';
+
   return (
     <div className="flex flex-col gap-3 font-sans">
       {/* Top Telemetry Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <SignalIcon className="w-3.5 h-3.5 text-gray-400" />
-          <span className="text-[10px] font-mono uppercase tracking-widest text-gray-400">
+          <SignalIcon className="w-3.5 h-3.5 text-zinc-400" />
+          <span className="text-[10px] font-mono uppercase tracking-widest text-zinc-400">
             RADAR TELEMETRY {accuracy ? `(±${Math.round(accuracy)}m)` : ''}
           </span>
         </div>
 
-        <span className={`text-[10px] font-mono tracking-wider uppercase px-2.5 py-0.5 rounded-md border font-semibold ${statusColor}`}>
-          {statusText}
-        </span>
+        <div className="flex items-center gap-2">
+          {manualOffset !== 0 && (
+            <button
+              onClick={resetToSensor}
+              className="text-[9px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-cyan-300 border border-cyan-500/30 transition-all"
+              title="Reset manual calibration to hardware sensor"
+            >
+              ↻ Reset Cal
+            </button>
+          )}
+
+          <span
+            className={`text-[10px] font-mono tracking-wider uppercase px-2.5 py-0.5 rounded-md border font-semibold ${statusColor}`}
+          >
+            {statusText}
+          </span>
+        </div>
       </div>
 
-      {/* Main Distance Readout & Directional Azimuth */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-baseline gap-2">
-          <span className="text-4xl font-black font-mono tracking-tighter text-white tabular-nums">
-            {Math.round(distanceMeters)}
-          </span>
-          <span className="text-xs font-mono uppercase tracking-wider text-gray-400">METERS</span>
+      {/* Main Distance Readout & Interactive Moving Compass Arrow */}
+      <div className="flex items-center justify-between gap-4">
+        {/* Distance metrics */}
+        <div className="flex flex-col">
+          <div className="flex items-baseline gap-2">
+            <span className="text-4xl font-black font-mono tracking-tighter text-white tabular-nums">
+              {Math.round(distanceMeters)}
+            </span>
+            <span className="text-xs font-mono uppercase tracking-wider text-zinc-400">METERS</span>
+          </div>
+          {relativeGuidance && (
+            <span className="text-[11px] font-mono text-cyan-300 font-bold uppercase tracking-wider mt-0.5">
+              {relativeGuidance}
+            </span>
+          )}
         </div>
 
-        <div className="flex items-center gap-3">
+        {/* Dynamic & Movable Interactive Compass Widget */}
+        <div className="flex items-center gap-2.5">
           {bearing != null && (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-gray-950/80 border border-white/10" title="Compass Bearing to Target">
-              <CompassArrowIcon className="w-5 h-5 text-cyan-400" angle={bearing} />
-              <span className="text-xs font-mono text-gray-300 tabular-nums">{Math.round(bearing)}°</span>
+            <div
+              ref={dialRef}
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              className={`relative w-16 h-16 rounded-full bg-zinc-950/90 border-2 ${
+                isDragging
+                  ? 'border-cyan-400 shadow-lg shadow-cyan-400/20 scale-105'
+                  : 'border-zinc-800 hover:border-zinc-700'
+              } flex items-center justify-center cursor-grab active:cursor-grabbing select-none transition-transform touch-none shadow-xl`}
+              title="Interactive Compass: Auto-rotates with device heading. Drag dial with mouse/touch to test or calibrate."
+            >
+              {/* Outer Cardinal Ring Indicators */}
+              <span className="absolute top-1 text-[8px] font-mono font-black text-rose-500 leading-none">
+                N
+              </span>
+              <span className="absolute right-1 text-[7px] font-mono text-zinc-400 leading-none">
+                E
+              </span>
+              <span className="absolute bottom-1 text-[7px] font-mono text-zinc-400 leading-none">
+                S
+              </span>
+              <span className="absolute left-1 text-[7px] font-mono text-zinc-400 leading-none">
+                W
+              </span>
+
+              {/* Central Dynamic Direction Arrow */}
+              <div
+                className="relative z-10 flex items-center justify-center"
+                style={{
+                  transform: `rotate(${smoothArrowAngle}deg)`,
+                  transition: isDragging
+                    ? 'none'
+                    : 'transform 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+                }}
+              >
+                <svg
+                  className="w-7 h-7 text-cyan-400 drop-shadow-[0_0_8px_rgba(34,211,238,0.5)]"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polygon
+                    points="12 2 19 21 12 17 5 21 12 2"
+                    fill="currentColor"
+                    fillOpacity="0.3"
+                  />
+                </svg>
+              </div>
+
+              {/* Bearing readout badge */}
+              <div className="absolute -bottom-2 bg-zinc-900 border border-zinc-700 px-1.5 py-0.2 rounded text-[8px] font-mono text-zinc-300 font-bold tracking-tight z-20">
+                {Math.round(bearing)}° {cardinalText}
+              </div>
             </div>
           )}
 
+          {/* Unlock Intel Button when within trigger radius */}
           {isBurning && onTriggerCheckIn && (
             <button
               onClick={onTriggerCheckIn}
               disabled={isLoading}
-              className="px-4 py-2 bg-emerald-400 hover:bg-emerald-300 active:scale-95 text-gray-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-emerald-400/25 transition-all flex items-center gap-1.5 min-h-[40px]"
+              className="px-4 py-2.5 bg-emerald-400 hover:bg-emerald-300 active:scale-95 text-zinc-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-emerald-400/25 transition-all flex items-center gap-1.5 min-h-[44px]"
             >
               <UnlockIcon className="w-4 h-4" />
               <span>{isLoading ? 'Decrypting…' : 'Unlock Intel'}</span>
@@ -130,10 +286,10 @@ export default function DistanceRadar({
           const segmentColor = isBurning
             ? 'bg-emerald-400 shadow-sm shadow-emerald-400/50'
             : isHot
-            ? 'bg-amber-400'
+            ? 'bg-amber-400 shadow-sm shadow-amber-400/50'
             : isWarm
             ? 'bg-cyan-400'
-            : 'bg-gray-400';
+            : 'bg-zinc-400';
 
           return (
             <div

@@ -285,20 +285,145 @@ router.patch('/map-settings', requireAuth('admin'), async (req, res) => {
   res.json(updated);
 });
 
+// Adjust team penalty or bonus minutes
+router.post('/teams/:id/penalty', requireAuth('admin'), async (req, res) => {
+  const teamId = Number(req.params.id);
+  const { minutes, kind, note } = req.body as { minutes: number; kind?: string; note?: string };
+  if (minutes == null || isNaN(Number(minutes))) {
+    res.status(400).json({ error: 'Valid minutes required' });
+    return;
+  }
+
+  const team = await prisma.team.findUnique({ where: { id: teamId } });
+  if (!team) {
+    res.status(404).json({ error: 'Team not found' });
+    return;
+  }
+
+  const numMinutes = Number(minutes);
+  const penalty = await prisma.penalty.create({
+    data: {
+      teamId,
+      kind: kind || (numMinutes > 0 ? 'admin_penalty' : 'admin_bonus'),
+      minutes: numMinutes,
+      appliedAt: new Date(),
+    },
+  });
+
+  const game = await prisma.game.findFirst({ orderBy: { id: 'desc' } });
+  const rankings = await buildLeaderboard();
+  if (game) {
+    io.to(`game:${game.id}`).emit('leaderboard:updated', { rankings });
+    io.to(`team:${teamId}`).emit('team:penalty_applied', {
+      minutes: numMinutes,
+      kind: penalty.kind,
+      note,
+    });
+  }
+
+  res.json({ ok: true, penalty, rankings });
+});
+
+// Get all uploaded photos
 router.get('/photos', requireAuth('admin'), async (_req, res) => {
-  res.json([]);
+  const photos = await prisma.photo.findMany({
+    include: { team: { select: { id: true, name: true } } },
+    orderBy: { submittedAt: 'desc' },
+  });
+  res.json(photos);
 });
 
-router.patch('/photos/:id', requireAuth('admin'), async (_req, res) => {
-  res.json({ ok: true });
+// Review photo (approve / reject)
+router.patch('/photos/:id', requireAuth('admin'), async (req, res) => {
+  const photoId = Number(req.params.id);
+  const { status, reviewNote } = req.body as { status: string; reviewNote?: string };
+
+  const photo = await prisma.photo.findUnique({ where: { id: photoId }, include: { team: true } });
+  if (!photo) {
+    res.status(404).json({ error: 'Photo not found' });
+    return;
+  }
+
+  const updated = await prisma.photo.update({
+    where: { id: photoId },
+    data: {
+      status,
+      reviewNote: reviewNote ?? null,
+      reviewedAt: new Date(),
+    },
+    include: { team: true },
+  });
+
+  io.to(`team:${photo.teamId}`).emit('photo:reviewed', {
+    photoId,
+    status,
+    reviewNote,
+  });
+
+  res.json(updated);
 });
 
+// List SOS alerts
 router.get('/sos', requireAuth('admin'), async (_req, res) => {
   const alerts = await prisma.sosAlert.findMany({
     include: { team: { select: { name: true } } },
     orderBy: { sentAt: 'desc' },
   });
   res.json(alerts);
+});
+
+// Resolve / acknowledge an SOS alert
+router.post('/sos/:id/resolve', requireAuth('admin'), async (req, res) => {
+  const id = Number(req.params.id);
+  try {
+    await prisma.sosAlert.delete({ where: { id } });
+    io.to('admin').emit('sos:resolved', { id });
+    res.json({ ok: true, resolvedId: id });
+  } catch {
+    res.status(404).json({ error: 'Alert not found or already resolved' });
+  }
+});
+
+// Delete SOS alert (alias)
+router.delete('/sos/:id', requireAuth('admin'), async (req, res) => {
+  const id = Number(req.params.id);
+  try {
+    await prisma.sosAlert.delete({ where: { id } });
+    io.to('admin').emit('sos:resolved', { id });
+    res.json({ ok: true, resolvedId: id });
+  } catch {
+    res.status(404).json({ error: 'Alert not found or already resolved' });
+  }
+});
+
+// Quick aggregated game stats
+router.get('/stats', requireAuth('admin'), async (_req, res) => {
+  const game = await prisma.game.findFirst({ orderBy: { id: 'desc' } });
+  const [totalTeams, finishedTeams, activeSos, pendingPhotos, totalPenalties] = await Promise.all([
+    prisma.team.count(),
+    prisma.team.count({ where: { finishedAt: { not: null } } }),
+    prisma.sosAlert.count(),
+    prisma.photo.count({ where: { status: 'pending' } }),
+    prisma.penalty.count(),
+  ]);
+
+  let elapsedSecs = 0;
+  if (game?.startedAt) {
+    const end = game.endedAt ? game.endedAt.getTime() : (game.pausedAt ? game.pausedAt.getTime() : Date.now());
+    elapsedSecs = Math.max(0, Math.floor((end - game.startedAt.getTime() - game.totalPausedMs) / 1000));
+  }
+
+  res.json({
+    gameId: game?.id ?? null,
+    gameStatus: game?.status ?? 'idle',
+    elapsedSecs,
+    totalTeams,
+    finishedTeams,
+    activeTeams: Math.max(0, totalTeams - finishedTeams),
+    activeSos,
+    pendingPhotos,
+    totalPenalties,
+  });
 });
 
 export default router;

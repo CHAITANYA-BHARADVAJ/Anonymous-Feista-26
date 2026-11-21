@@ -11,6 +11,8 @@ model Team {
   id        Int       @id @default(autoincrement())
   name      String    @unique
   code      String
+  leaderName String?
+  mobile    String?
   finishedAt DateTime?
   createdAt DateTime  @default(now())
 
@@ -37,6 +39,8 @@ model Game {
   id              Int       @id @default(autoincrement())
   name            String
   status          String    @default("idle")
+  registrationOpen Boolean  @default(true)
+  maxTeams        Int       @default(25)
   campusMapUrl    String?
   campusMapBounds String?
   startedAt       DateTime?
@@ -109,6 +113,7 @@ model TeamLevelProgress {
   id                Int       @id @default(autoincrement())
   teamId            Int
   levelId           Int
+  stepNumber        Int       @default(1)
   unlockedAt        DateTime
   locationReachedAt DateTime?
   completedAt       DateTime?

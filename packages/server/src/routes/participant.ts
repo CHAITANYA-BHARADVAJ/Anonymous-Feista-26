@@ -1,9 +1,11 @@
 import { Router } from 'express';
 import { prisma } from '../lib/prisma';
 import { requireAuth, AuthRequest } from '../middleware/auth';
+import { photoUpload } from '../middleware/upload';
 import { io } from '../index';
 import { scheduleTeamLevelTimer } from '../services/timerService';
 import { buildLeaderboard } from '../services/scoreService';
+import { dispatchNextConflictFreeClue } from '../services/dispatchService';
 
 const router = Router();
 
@@ -131,33 +133,19 @@ router.post('/levels/:id/answer', requireAuth('team'), async (req: AuthRequest, 
     data: { completedAt: new Date(), completedBy: 'answer' },
   });
 
-  // Unlock next level
-  const nextLevel = await prisma.level.findFirst({
-    where: { gameId: level.gameId, orderIndex: level.orderIndex + 1 },
-  });
-
-  if (nextLevel) {
-    const nextProgress = await prisma.teamLevelProgress.create({
-      data: { teamId, levelId: nextLevel.id, unlockedAt: new Date() },
-    });
-
-    io.to(`team:${teamId}`).emit('level:unlocked', {
-      levelId: nextLevel.id,
-      orderIndex: nextLevel.orderIndex,
-      unlockedAt: nextProgress.unlockedAt,
-    });
-
-    if (nextLevel.durationSecs && game?.status === 'running') {
-      const deadline = nextProgress.unlockedAt.getTime() + nextLevel.durationSecs * 1000;
-      scheduleTeamLevelTimer(io, nextProgress.id, teamId, nextLevel.id, deadline);
-    }
-  }
+  // Dynamically assign next conflict-free clue (or Grand Finale at step 10)
+  const dispatch = await dispatchNextConflictFreeClue(io, teamId, level.gameId);
 
   // Update leaderboard
   const rankings = await buildLeaderboard();
   if (game) io.to(`game:${game.id}`).emit('leaderboard:updated', { rankings });
 
-  res.json({ correct: true, nextLevelId: nextLevel?.id ?? null });
+  res.json({
+    correct: true,
+    nextLevelId: dispatch.nextLevel?.id ?? null,
+    stepNumber: dispatch.stepNumber,
+    finished: dispatch.finished,
+  });
 });
 
 // Reveal hint
@@ -259,6 +247,29 @@ router.post('/sos', requireAuth('team'), async (req: AuthRequest, res) => {
   });
 
   res.json({ ok: true });
+});
+
+// Upload verification photo
+router.post('/photos', requireAuth('team'), photoUpload.single('photo'), async (req: AuthRequest, res) => {
+  const teamId = req.user!.sub;
+  if (!req.file) {
+    res.status(400).json({ error: 'Photo image file is required' });
+    return;
+  }
+
+  const relativePath = `/uploads/${teamId}/${req.file.filename}`;
+  const photo = await prisma.photo.create({
+    data: {
+      teamId,
+      filePath: relativePath,
+      submittedAt: new Date(),
+      status: 'pending',
+    },
+    include: { team: { select: { id: true, name: true } } },
+  });
+
+  io.to('admin').emit('admin:photo_submitted', { photo });
+  res.status(201).json(photo);
 });
 
 export default router;

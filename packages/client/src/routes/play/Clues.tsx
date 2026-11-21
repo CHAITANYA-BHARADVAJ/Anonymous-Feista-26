@@ -21,6 +21,9 @@ export default function Clues() {
   const [hintLoading, setHintLoading] = useState<number | null>(null);
   const [showClueModal, setShowClueModal] = useState(false);
   const [checkInLoading, setCheckInLoading] = useState(false);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoUploaded, setPhotoUploaded] = useState(false);
+  const [photoError, setPhotoError] = useState('');
   const navigate = useNavigate();
 
   const level = currentLevel?.level;
@@ -284,6 +287,46 @@ export default function Clues() {
               2. Capture live photo together on your camera.<br />
               3. Sprint to <strong>Start Venue</strong> and present proof to coordinators!
             </p>
+          </div>
+
+          {/* Live Photo Upload Option */}
+          <div className="pt-2 flex flex-col items-center gap-2">
+            <label className="cursor-pointer py-3 px-5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-mono font-bold text-xs shadow-lg shadow-emerald-600/30 transition-all flex items-center gap-2">
+              <span>📷</span>
+              <span>{photoUploading ? 'UPLOADING TO COMMAND DESK…' : photoUploaded ? '✓ PHOTO TRANSMITTED (TAP TO RE-TAKE)' : 'SNAP & TRANSMIT PHOTO'}</span>
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                disabled={photoUploading}
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  setPhotoError('');
+                  setPhotoUploading(true);
+                  try {
+                    const fd = new FormData();
+                    fd.append('photo', file);
+                    await api.uploadPhoto(fd);
+                    setPhotoUploaded(true);
+                    triggerHaptic();
+                  } catch (err: any) {
+                    setPhotoError(err.message ?? 'Photo upload failed');
+                  } finally {
+                    setPhotoUploading(false);
+                  }
+                }}
+              />
+            </label>
+            {photoError && (
+              <p className="text-red-400 text-xs font-mono">{photoError}</p>
+            )}
+            {photoUploaded && (
+              <p className="text-emerald-400 text-[11px] font-mono">
+                ✓ Photo delivered to Event Control Queue! Sprint to Start Venue!
+              </p>
+            )}
           </div>
 
           <div className="p-3 bg-black/60 border border-emerald-500/20 rounded-xl text-[11px] text-emerald-300 font-mono font-bold">

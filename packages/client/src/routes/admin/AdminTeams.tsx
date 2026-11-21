@@ -3,15 +3,27 @@ import { api } from '../../lib/api';
 
 export default function AdminTeams() {
   const [teams, setTeams] = useState<any[]>([]);
+  const [game, setGame] = useState<any>(null);
+  const [regStatus, setRegStatus] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
+  const [copiedLink, setCopiedLink] = useState(false);
 
   // New Team Form state
   const [teamName, setTeamName] = useState('');
+  const [leaderName, setLeaderName] = useState('');
+  const [mobile, setMobile] = useState('');
   const [accessCode, setAccessCode] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
   const [formSuccess, setFormSuccess] = useState('');
+
+  // Printable Cards Modal
+  const [showPrintModal, setShowPrintModal] = useState(false);
+  const [recentCredentials, setRecentCredentials] = useState<Record<string, string>>({
+    'Team Alpha': 'hunt2026',
+    'Team Beta': 'fiesta26',
+  });
 
   useEffect(() => {
     loadTeams();
@@ -20,13 +32,38 @@ export default function AdminTeams() {
   async function loadTeams() {
     setLoading(true);
     try {
-      const data = await api.getAdminTeams();
+      const [data, games, reg] = await Promise.all([
+        api.getAdminTeams(),
+        api.getGames(),
+        api.getRegistrationStatus().catch(() => null),
+      ]);
       setTeams(data);
+      setGame(games[0] ?? null);
+      setRegStatus(reg);
     } catch (err: any) {
       console.error('Failed to load teams:', err);
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleToggleRegistration() {
+    if (!game) return;
+    try {
+      const nextState = !game.registrationOpen;
+      await api.updateGameSettings(game.id, { registrationOpen: nextState });
+      setGame((g: any) => ({ ...g, registrationOpen: nextState }));
+      if (regStatus) setRegStatus((r: any) => ({ ...r, registrationOpen: nextState }));
+    } catch (err: any) {
+      alert(err.message ?? 'Failed to toggle registration');
+    }
+  }
+
+  function handleCopyRegLink() {
+    const url = `${window.location.origin}/register`;
+    navigator.clipboard.writeText(url);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2000);
   }
 
   function generateRandomCode() {
@@ -48,10 +85,14 @@ export default function AdminTeams() {
       return;
     }
 
+    const tName = teamName.trim();
+    const tCode = accessCode.trim();
+
     setIsSubmitting(true);
     try {
-      await api.createTeam(teamName.trim(), accessCode.trim());
-      setFormSuccess(`✓ Team "${teamName.trim()}" successfully registered! Code: "${accessCode.trim()}"`);
+      await api.createTeam(tName, tCode);
+      setFormSuccess(`✓ Team "${tName}" registered (Code: ${tCode})`);
+      setRecentCredentials((prev) => ({ ...prev, [tName]: tCode }));
       setTeamName('');
       setAccessCode('');
       await loadTeams();
@@ -63,7 +104,11 @@ export default function AdminTeams() {
   }
 
   async function handleDelete(teamId: number, name: string) {
-    if (!confirm(`Are you sure you want to permanently delete "${name}"? This removes all their progress, location logs, and sessions.`)) {
+    if (
+      !confirm(
+        `Are you sure you want to permanently delete "${name}"? This removes their progress, location logs, and sessions.`,
+      )
+    ) {
       return;
     }
     try {
@@ -87,68 +132,126 @@ export default function AdminTeams() {
     }
   }
 
-  const filtered = teams.filter((t) =>
-    t.name.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = teams.filter((t) => t.name.toLowerCase().includes(search.toLowerCase()));
 
   return (
-    <div className="p-4 flex flex-col gap-6 pb-16 max-w-5xl mx-auto">
+    <div className="p-4 md:p-6 flex flex-col gap-5 max-w-7xl mx-auto pb-24 font-sans text-zinc-100">
       {/* Header */}
-      <div className="bg-gray-900 border border-gray-800 rounded-3xl p-5 shadow-xl flex flex-wrap items-center justify-between gap-4">
+      <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-5 flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-black text-white">👥 Team Registration & Roster</h2>
-          <p className="text-xs text-gray-400 mt-1">
-            Register new participating teams, manage credentials, and monitor team status for SDMCET Campus Hunt.
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl font-bold tracking-tight text-white">Teams & Roster Desk</h2>
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-800 text-cyan-300 font-bold border border-zinc-700">
+              {teams.length} / {game?.maxTeams ?? 25} Squads
+            </span>
+          </div>
+          <p className="text-xs text-zinc-400 mt-1 font-mono">
+            Manage participating teams, public self-registration status, and credential distribution slips.
           </p>
         </div>
+
         <div className="flex items-center gap-2">
-          <span className="text-xs bg-brand-900 text-brand-300 px-3 py-1.5 rounded-full font-mono font-bold">
-            {teams.length} Teams Registered
-          </span>
+          <button
+            onClick={() => setShowPrintModal(true)}
+            className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-medium text-zinc-200 border border-zinc-700 transition-all flex items-center gap-1.5"
+          >
+            <span>🖨️</span>
+            <span>Print Login Slips</span>
+          </button>
+        </div>
+      </div>
+
+      {/* PUBLIC SELF-REGISTRATION MANAGEMENT CARD */}
+      <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-5 flex flex-col gap-3.5 shadow-xl">
+        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-zinc-800">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold text-white flex items-center gap-1.5">
+                <span>🌐</span>
+                <span>Public Squad Self-Registration Gateway</span>
+              </span>
+              <span
+                className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold uppercase ${
+                  game?.registrationOpen
+                    ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                    : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
+                }`}
+              >
+                {game?.registrationOpen ? '🟢 OPEN (TEAMS CAN SELF-REGISTER)' : '🔴 LOCKED (REGISTRATION CLOSED)'}
+              </span>
+            </div>
+            <p className="text-xs text-zinc-400 mt-0.5 font-mono">
+              Share the public link with participants. Teams choose their call-sign, leader details, and access passcode directly.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleToggleRegistration}
+              className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-all border ${
+                game?.registrationOpen
+                  ? 'bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border-rose-500/40'
+                  : 'bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border-emerald-500/40'
+              }`}
+            >
+              {game?.registrationOpen ? 'Lock Registration' : 'Open Registration'}
+            </button>
+          </div>
+        </div>
+
+        {/* Link Share Box */}
+        <div className="flex flex-col sm:flex-row items-center gap-2 bg-zinc-950 p-3 rounded-xl border border-zinc-800">
+          <span className="text-xs font-mono text-zinc-400 shrink-0">Registration Link:</span>
+          <code className="text-xs font-mono text-cyan-300 bg-zinc-900 px-3 py-1.5 rounded-lg border border-zinc-800 flex-1 truncate select-all">
+            {typeof window !== 'undefined' ? `${window.location.origin}/register` : '/register'}
+          </code>
+          <button
+            onClick={handleCopyRegLink}
+            className="px-3.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-white text-xs font-mono font-bold transition-all flex items-center gap-1 shrink-0"
+          >
+            <span>{copiedLink ? '✓ Copied!' : '📋 Copy Link'}</span>
+          </button>
         </div>
       </div>
 
       {/* Registration Form Card */}
-      <div className="bg-gray-900 border border-gray-800 rounded-3xl p-6 shadow-xl">
-        <h3 className="text-base font-bold text-white mb-1 flex items-center gap-2">
-          <span>➕</span> Register New Team
-        </h3>
-        <p className="text-xs text-gray-400 mb-4">
-          Teams log in using their Team Name and Access Code at{' '}
-          <span className="text-brand-400 font-mono">http://localhost:5173/login</span>.
+      <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-5">
+        <h3 className="text-sm font-semibold text-white mb-1">Register New Team</h3>
+        <p className="text-xs text-zinc-400 mb-3 font-mono">
+          Teams log in using their Team Name and Access Code at <span className="text-zinc-200 underline">/login</span>.
         </p>
 
         {formError && (
-          <div className="p-3 mb-4 rounded-xl bg-red-950/80 border border-red-600/50 text-red-300 text-xs font-medium">
+          <div className="p-2.5 mb-3 rounded-lg bg-rose-950/40 border border-rose-500/40 text-rose-300 text-xs font-mono">
             ⚠️ {formError}
           </div>
         )}
 
         {formSuccess && (
-          <div className="p-3 mb-4 rounded-xl bg-emerald-950/80 border border-emerald-600/50 text-emerald-300 text-xs font-medium">
+          <div className="p-2.5 mb-3 rounded-lg bg-emerald-950/40 border border-emerald-500/40 text-emerald-300 text-xs font-mono">
             {formSuccess}
           </div>
         )}
 
         <form onSubmit={handleRegister} className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-          <div className="md:col-span-5 flex flex-col gap-1.5">
-            <label className="text-xs font-semibold text-gray-300">Team Name</label>
+          <div className="md:col-span-5 flex flex-col gap-1">
+            <label className="text-[11px] font-medium text-zinc-400">Team Call-Sign</label>
             <input
               type="text"
               value={teamName}
               onChange={(e) => setTeamName(e.target.value)}
               placeholder="e.g. Team Gamma, CodeBreakers"
-              className="w-full px-4 py-2.5 rounded-xl bg-gray-950 border border-gray-700 text-white text-sm focus:outline-none focus:border-brand-400"
+              className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-zinc-100 text-xs font-mono focus:outline-none focus:border-zinc-500"
             />
           </div>
 
-          <div className="md:col-span-4 flex flex-col gap-1.5">
+          <div className="md:col-span-4 flex flex-col gap-1">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold text-gray-300">Access Code</label>
+              <label className="text-[11px] font-medium text-zinc-400">Access Code</label>
               <button
                 type="button"
                 onClick={generateRandomCode}
-                className="text-[11px] text-brand-400 hover:text-brand-300 font-medium underline"
+                className="text-[10px] text-zinc-400 hover:text-zinc-200 font-mono underline"
               >
                 Auto-generate
               </button>
@@ -158,7 +261,7 @@ export default function AdminTeams() {
               value={accessCode}
               onChange={(e) => setAccessCode(e.target.value)}
               placeholder="e.g. hunt2026, sdm782"
-              className="w-full px-4 py-2.5 rounded-xl bg-gray-950 border border-gray-700 text-white font-mono text-sm focus:outline-none focus:border-brand-400"
+              className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-zinc-100 text-xs font-mono focus:outline-none focus:border-zinc-500"
             />
           </div>
 
@@ -166,108 +269,103 @@ export default function AdminTeams() {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full py-2.5 px-4 rounded-xl bg-brand-600 hover:bg-brand-500 active:scale-95 text-white text-sm font-bold shadow-lg shadow-brand-600/30 transition-all min-h-[44px] flex items-center justify-center gap-2"
+              className="w-full py-2 px-3 rounded-xl bg-zinc-100 hover:bg-white active:scale-95 text-zinc-950 text-xs font-semibold shadow transition-all min-h-[38px] flex items-center justify-center gap-1.5"
             >
-              {isSubmitting ? (
-                <span>Registering…</span>
-              ) : (
-                <>
-                  <span>➕</span>
-                  <span>Register Team</span>
-                </>
-              )}
+              {isSubmitting ? 'Registering…' : '+ Register Team'}
             </button>
           </div>
         </form>
       </div>
 
       {/* Team Roster Grid */}
-      <div className="bg-gray-900 border border-gray-800 rounded-3xl p-6 shadow-xl flex flex-col gap-4">
+      <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-5 flex flex-col gap-3.5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h3 className="text-base font-bold text-white">Registered Teams</h3>
-            <p className="text-xs text-gray-400">Manage credentials, reset status, and track team progress.</p>
+            <h3 className="text-sm font-semibold text-white">Registered Teams Roster</h3>
+            <p className="text-xs text-zinc-400 font-mono">Manage credentials and monitor team progress.</p>
           </div>
 
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="🔍 Search teams…"
-            className="px-3.5 py-2 rounded-xl bg-gray-950 border border-gray-700 text-white text-xs focus:outline-none focus:border-brand-400 w-56"
+            placeholder="Search teams…"
+            className="px-3 py-1.5 rounded-lg bg-zinc-950 border border-zinc-800 text-zinc-100 text-xs font-mono focus:outline-none focus:border-zinc-500 w-48"
           />
         </div>
 
         {loading ? (
-          <div className="py-12 text-center text-gray-500 text-sm">Loading team roster…</div>
+          <div className="py-12 text-center text-zinc-500 font-mono text-xs">Loading roster…</div>
         ) : filtered.length === 0 ? (
-          <div className="py-12 text-center text-gray-500 text-sm">
-            {teams.length === 0 ? 'No teams registered yet. Use the form above to add your first team.' : 'No teams match your search.'}
+          <div className="py-12 text-center text-zinc-500 font-mono text-xs">
+            {teams.length === 0
+              ? 'No teams registered yet. Use the form above to enrol your first team.'
+              : 'No teams match your search.'}
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {filtered.map((t) => {
               const currentProgress = t.levelProgress?.[0];
-              const isFinished = !!t.finishedAt;
+              const isFinished = Boolean(t.finishedAt);
+              const knownCode = recentCredentials[t.name] ?? '••••••';
+              const penaltyMinutes = t.penalties?.reduce((acc: number, p: any) => acc + (p.minutes || 0), 0) ?? 0;
 
               return (
                 <div
                   key={t.id}
-                  className="bg-gray-950 border border-gray-800 rounded-2xl p-4 flex flex-col justify-between gap-3 hover:border-gray-700 transition-all shadow-md"
+                  className="bg-zinc-950/70 border border-zinc-800/80 rounded-xl p-3.5 flex flex-col justify-between gap-3"
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-brand-950/80 border border-brand-500/30 flex items-center justify-center text-brand-300 font-black text-sm">
-                        {t.name.substring(0, 2).toUpperCase()}
-                      </div>
-                      <div>
-                        <h4 className="font-bold text-white text-sm">{t.name}</h4>
-                        <p className="text-[11px] text-gray-400 font-mono">ID: #{t.id}</p>
-                      </div>
+                    <div>
+                      <h4 className="font-semibold text-white text-sm">{t.name}</h4>
+                      {t.leaderName && (
+                        <p className="text-[11px] text-zinc-400 font-mono mt-0.5">
+                          Leader: <strong className="text-zinc-200">{t.leaderName}</strong> {t.mobile ? `(${t.mobile})` : ''}
+                        </p>
+                      )}
+                      <p className="text-[11px] text-zinc-400 font-mono mt-0.5">
+                        Code: <strong className="text-zinc-200 font-mono">{knownCode}</strong>
+                      </p>
                     </div>
 
                     {isFinished ? (
-                      <span className="text-[11px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2.5 py-0.5 rounded-full font-bold">
-                        🏆 Finished
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                        FINISHED 🏁
                       </span>
                     ) : (
-                      <span className="text-[11px] bg-brand-500/10 text-brand-300 border border-brand-500/30 px-2.5 py-0.5 rounded-full font-semibold">
-                        {currentProgress?.level ? `Level ${currentProgress.level.orderIndex}` : 'Awaiting Start'}
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-950/60 text-cyan-300 border border-cyan-500/30 font-bold">
+                        {currentProgress ? `Step ${currentProgress.stepNumber ?? 1} / 10` : 'Standby'}
                       </span>
                     )}
                   </div>
 
-                  <div className="bg-gray-900/60 rounded-xl p-2.5 border border-gray-800/80 flex items-center justify-between text-xs">
-                    <div className="text-gray-400">
-                      <span>Status: </span>
-                      <strong className="text-gray-200">
-                        {isFinished
-                          ? `Finished at ${new Date(t.finishedAt).toLocaleTimeString()}`
-                          : currentProgress?.level?.title ?? 'Ready for Start'}
-                      </strong>
-                    </div>
-                    {t.penalties?.length > 0 && (
-                      <span className="text-red-400 font-semibold text-[11px]">
-                        +{t.penalties.reduce((acc: number, p: any) => acc + p.penaltyMins, 0)}m penalty
+                  <div className="bg-zinc-900/60 rounded-lg p-2 border border-zinc-800/60 flex items-center justify-between text-xs font-mono">
+                    <span className="text-zinc-400 text-[11px]">
+                      {isFinished
+                        ? `Finished ${new Date(t.finishedAt).toLocaleTimeString()}`
+                        : currentProgress?.level?.title ?? 'Ready'}
+                    </span>
+                    {penaltyMinutes !== 0 && (
+                      <span className={`text-[11px] font-bold ${penaltyMinutes > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                        {penaltyMinutes > 0 ? `+${penaltyMinutes}` : penaltyMinutes}m
                       </span>
                     )}
                   </div>
 
-                  {/* Team Actions */}
-                  <div className="flex items-center justify-end gap-2 pt-1 border-t border-gray-800/60">
+                  <div className="flex items-center justify-end gap-1.5 pt-1 border-t border-zinc-800/60">
                     <button
                       onClick={() => handleReset(t.id, t.name)}
-                      className="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-semibold transition-all"
-                      title="Reset team's progress to restart from level 1"
+                      className="px-2.5 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[11px] font-mono"
+                      title="Reset progress to Stage 1"
                     >
-                      🔄 Reset Progress
+                      Reset
                     </button>
                     <button
                       onClick={() => handleDelete(t.id, t.name)}
-                      className="px-3 py-1.5 rounded-lg bg-red-950/40 hover:bg-red-900/60 text-red-400 border border-red-800/40 text-xs font-semibold transition-all"
-                      title="Delete team permanently"
+                      className="px-2.5 py-1 rounded-md bg-zinc-800 hover:bg-rose-950/60 text-zinc-400 hover:text-rose-400 text-[11px] font-mono"
+                      title="Delete team"
                     >
-                      🗑 Remove
+                      Remove
                     </button>
                   </div>
                 </div>
@@ -276,6 +374,63 @@ export default function AdminTeams() {
           </div>
         )}
       </div>
+
+      {/* Printable Slips Modal */}
+      {showPrintModal && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-xl w-full p-5 shadow-2xl flex flex-col max-h-[85vh]">
+            <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
+              <div>
+                <h3 className="font-semibold text-white text-sm">Team Login Slips</h3>
+                <p className="text-xs text-zinc-400 font-mono">Distribute to team captains at check-in.</p>
+              </div>
+              <button
+                onClick={() => setShowPrintModal(false)}
+                className="w-7 h-7 rounded-lg bg-zinc-800 text-zinc-400 hover:text-white flex items-center justify-center font-mono text-xs"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="overflow-y-auto py-3 space-y-2 flex-1">
+              {teams.map((t) => (
+                <div
+                  key={t.id}
+                  className="bg-zinc-950 p-3 rounded-xl border border-dashed border-zinc-800 flex items-center justify-between font-mono text-xs"
+                >
+                  <div>
+                    <span className="text-[9px] text-zinc-500 uppercase block">SDMCET CAMPUS HUNT 2026</span>
+                    <h4 className="font-bold text-white text-sm">{t.name}</h4>
+                    <span className="text-zinc-500 text-[11px]">URL: /login</span>
+                  </div>
+
+                  <div className="text-right">
+                    <span className="text-[9px] text-zinc-500 block uppercase">Code</span>
+                    <span className="text-sm font-bold text-zinc-100 bg-zinc-800 px-2.5 py-0.5 rounded border border-zinc-700">
+                      {recentCredentials[t.name] ?? 'hunt2026'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="pt-3 border-t border-zinc-800 flex justify-end gap-2">
+              <button
+                onClick={() => window.print()}
+                className="px-3.5 py-1.5 rounded-lg bg-zinc-100 text-zinc-950 font-semibold text-xs"
+              >
+                Print / Save PDF
+              </button>
+              <button
+                onClick={() => setShowPrintModal(false)}
+                className="px-3 py-1.5 rounded-lg bg-zinc-800 text-zinc-300 text-xs"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

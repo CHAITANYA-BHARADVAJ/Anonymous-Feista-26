@@ -54,6 +54,12 @@ app.use('/api/v1/admin', adminRouter);
 
 app.get('/api/v1/health', (_req, res) => res.json({ ok: true }));
 
+// Global error handler
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('Unhandled server error:', err);
+  res.status(500).json({ error: err.message ?? 'Internal server error' });
+});
+
 // Serve built React PWA client in production
 const clientDist = path.resolve(__dirname, '../../client/dist');
 if (fs.existsSync(clientDist)) {

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuthStore } from '../stores/authStore';
 import { requestFullscreen, enableAutoFullscreenOnFirstGesture } from '../lib/fullscreen';
@@ -25,7 +25,7 @@ export default function Login() {
     try {
       const data = await api.teamLogin(name.trim(), code.trim());
       setTeam(data.teamId, data.teamName, '');
-      navigate('/play/home');
+      navigate('/play');
     } catch (err: any) {
       setError(err.message ?? 'Authentication rejected: invalid team credentials');
     } finally {
@@ -100,6 +100,12 @@ export default function Login() {
           >
             {loading ? 'AUTHENTICATING…' : 'CONNECT & COMMENCE →'}
           </button>
+
+          <div className="pt-2 border-t border-white/5 text-center">
+            <Link to="/register" className="text-xs font-mono text-gray-400 hover:text-cyan-300 transition-colors">
+              New team? <span className="text-cyan-400 font-bold underline">Register squad here</span>
+            </Link>
+          </div>
         </form>
 
         <div className="flex flex-col items-center gap-1 text-center">

@@ -4,6 +4,7 @@ import { requireAuth } from '../middleware/auth';
 import { io } from '../index';
 import { buildLeaderboard } from '../services/scoreService';
 import { rescheduleTimers, cancelTeamLevelTimer } from '../services/timerService';
+import { kickoffConflictFreeGame, getCampusOccupancyMatrix } from '../services/dispatchService';
 
 const router = Router();
 
@@ -37,29 +38,28 @@ router.patch('/:id/status', requireAuth('admin'), async (req, res) => {
   let update: Parameters<typeof prisma.game.update>[0]['data'] = {};
 
   if (action === 'start') {
-    // If game was ended, clean up prior completion timestamps for a fresh run
-    if (game.status === 'ended') {
-      await prisma.team.updateMany({ data: { finishedAt: null } });
-      await prisma.hintReveal.deleteMany({});
-      await prisma.teamLevelProgress.deleteMany({});
-      await prisma.teamLocation.deleteMany({});
-      await prisma.sosAlert.deleteMany({});
-      await prisma.penalty.deleteMany({});
-    }
+    // If game was ended or resetting, clean up prior completion timestamps
+    await prisma.team.updateMany({ data: { finishedAt: null } });
+    await prisma.hintReveal.deleteMany({});
+    await prisma.teamLevelProgress.deleteMany({});
+    await prisma.teamLocation.deleteMany({});
+    await prisma.sosAlert.deleteMany({});
+    await prisma.penalty.deleteMany({});
 
     update = { status: 'running', startedAt: new Date(), endedAt: null, pausedAt: null, totalPausedMs: 0 };
-    // Unlock level 1 for all teams
-    const teams = await prisma.team.findMany();
-    const level1 = await prisma.level.findFirst({ where: { gameId, orderIndex: 1 } });
-    if (level1) {
-      for (const team of teams) {
-        await prisma.teamLevelProgress.upsert({
-          where: { teamId_levelId: { teamId: team.id, levelId: level1.id } },
-          update: { completedAt: null, completedBy: null, locationReachedAt: null, unlockedAt: new Date() },
-          create: { teamId: team.id, levelId: level1.id, unlockedAt: new Date() },
-        });
-      }
+    await prisma.game.update({ where: { id: gameId }, data: update });
+
+    // Kick off conflict-free synchronized distribution across unique starting landmarks
+    try {
+      await kickoffConflictFreeGame(io, gameId);
+    } catch (err: any) {
+      console.warn('Conflict-free kickoff warning:', err.message);
     }
+
+    const updated = await prisma.game.findUnique({ where: { id: gameId } });
+    io.emit('game:status', { status: 'running', game: updated });
+    res.json(updated);
+    return;
   } else if (action === 'pause' && game.status === 'running') {
     update = { status: 'paused', pausedAt: new Date() };
   } else if (action === 'resume' && game.status === 'paused') {
@@ -113,6 +113,37 @@ router.post('/:id/announcements', requireAuth('admin'), async (req, res) => {
     io.to(`team:${targetTeamId}`).emit('game:announcement', { kind, message, sentAt: ann.sentAt });
   }
   res.status(201).json(ann);
+});
+
+// Live Campus Landmark Occupancy Matrix for Conflict-Free Monitor
+router.get('/:id/occupancy', requireAuth('admin'), async (req, res) => {
+  const gameId = Number(req.params.id);
+  const matrix = await getCampusOccupancyMatrix(gameId);
+  res.json(matrix);
+});
+
+// Update game settings (registration open/close, max teams limit)
+router.patch('/:id/settings', requireAuth('admin'), async (req, res) => {
+  const gameId = Number(req.params.id);
+  const { registrationOpen, maxTeams } = req.body as {
+    registrationOpen?: boolean;
+    maxTeams?: number;
+  };
+
+  const updated = await prisma.game.update({
+    where: { id: gameId },
+    data: {
+      ...(registrationOpen != null ? { registrationOpen: Boolean(registrationOpen) } : {}),
+      ...(maxTeams != null ? { maxTeams: Number(maxTeams) } : {}),
+    },
+  });
+
+  io.emit('game:settings_updated', {
+    registrationOpen: updated.registrationOpen,
+    maxTeams: updated.maxTeams,
+  });
+
+  res.json(updated);
 });
 
 export default router;

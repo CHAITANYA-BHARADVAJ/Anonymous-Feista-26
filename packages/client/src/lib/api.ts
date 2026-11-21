@@ -20,6 +20,19 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ name, code }),
     }),
+  registerTeam: (name: string, leaderName: string, mobile: string, code: string) =>
+    request<{ teamId: number; teamName: string; leaderName?: string; mobile?: string }>('/auth/team/register', {
+      method: 'POST',
+      body: JSON.stringify({ name, leaderName, mobile, code }),
+    }),
+  getRegistrationStatus: () =>
+    request<{
+      registrationOpen: boolean;
+      gameStatus: string;
+      registeredTeams: number;
+      maxTeams: number;
+      slotsRemaining: number;
+    }>('/auth/registration/status'),
   adminLogin: (username: string, password: string) =>
     request<{ role: string }>('/auth/admin/login', {
       method: 'POST',
@@ -80,11 +93,15 @@ export const api = {
       body: JSON.stringify({ message, kind, targetTeamId }),
     }),
   getLevels: (gameId: number) => request<any[]>(`/levels/game/${gameId}`),
+  generate26Pack: (gameId: number) => request<any>(`/levels/game/${gameId}/generate-25-pack`, { method: 'POST' }),
   createLevel: (gameId: number, data: any) =>
     request<any>(`/levels/game/${gameId}`, { method: 'POST', body: JSON.stringify(data) }),
   updateLevel: (id: number, data: any) =>
     request<any>(`/levels/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteLevel: (id: number) => request<any>(`/levels/${id}`, { method: 'DELETE' }),
+  getOccupancyMatrix: (gameId: number) => request<any[]>(`/games/${gameId}/occupancy`),
+  updateGameSettings: (gameId: number, settings: { registrationOpen?: boolean; maxTeams?: number }) =>
+    request<any>(`/games/${gameId}/settings`, { method: 'PATCH', body: JSON.stringify(settings) }),
   getZones: (gameId: number) => request<any[]>(`/zones/game/${gameId}`),
   createZone: (gameId: number, data: any) =>
     request<any>(`/zones/game/${gameId}`, { method: 'POST', body: JSON.stringify(data) }),
@@ -92,4 +109,30 @@ export const api = {
   deleteZone: (zoneId: number) => request(`/zones/${zoneId}`, { method: 'DELETE' }),
   updateMapSettings: (data: { campusMapUrl?: string; campusMapBounds?: string }) =>
     request<any>('/admin/map-settings', { method: 'PATCH', body: JSON.stringify(data) }),
+  adjustTeamPenalty: (teamId: number, minutes: number, note?: string) =>
+    request<any>(`/admin/teams/${teamId}/penalty`, {
+      method: 'POST',
+      body: JSON.stringify({ minutes, note }),
+    }),
+  resolveSos: (id: number) =>
+    request<any>(`/admin/sos/${id}/resolve`, { method: 'POST' }),
+  getAdminPhotos: () => request<any[]>('/admin/photos'),
+  reviewPhoto: (id: number, status: string, reviewNote?: string) =>
+    request<any>(`/admin/photos/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status, reviewNote }),
+    }),
+  getAdminStats: () => request<any>('/admin/stats'),
+  uploadPhoto: async (formData: FormData) => {
+    const res = await fetch('/api/v1/participant/photos', {
+      method: 'POST',
+      credentials: 'include',
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error ?? `Upload failed with HTTP ${res.status}`);
+    }
+    return res.json();
+  },
 };
