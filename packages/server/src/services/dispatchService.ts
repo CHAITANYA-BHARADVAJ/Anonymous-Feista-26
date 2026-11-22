@@ -1,6 +1,5 @@
 import { Server } from 'socket.io';
 import { prisma } from '../lib/prisma';
-import { scheduleTeamLevelTimer } from './timerService';
 import { buildLeaderboard } from './scoreService';
 
 // Fisher-Yates shuffle helper
@@ -14,8 +13,64 @@ function shuffleArray<T>(array: T[]): T[] {
 }
 
 /**
- * Synchronized Conflict-Free Game Kickoff:
- * Simultaneously distributes all active teams across unique intermediate starting landmarks.
+ * Generate a randomized balanced path of clues for a team.
+ * From N available intermediate clues (10–15), selects up to 9 clues,
+ * shuffles them so each team traverses the campus in a unique sequence,
+ * and saves them into the TeamPath table.
+ */
+export async function generateTeamPath(
+  teamId: number,
+  gameId: number,
+  intermediateLevels?: any[],
+  targetCount = 9,
+) {
+  // If team already has path rows, return them
+  const existing = await prisma.teamPath.findMany({
+    where: { teamId },
+    orderBy: { stepNumber: 'asc' },
+  });
+  if (existing.length > 0) return existing;
+
+  const poolLevels =
+    intermediateLevels ??
+    (await prisma.level.findMany({
+      where: { gameId, isFinal: false },
+      orderBy: { orderIndex: 'asc' },
+    }));
+
+  if (poolLevels.length === 0) {
+    return [];
+  }
+
+  // Count to assign (up to 9, or all if pool is smaller)
+  const count = Math.min(targetCount, poolLevels.length);
+
+  // Pick count distinct levels from pool
+  const shuffledPool = shuffleArray(poolLevels);
+  const selectedLevels = shuffledPool.slice(0, count);
+
+  // Randomize sequence of selected clues
+  const orderedLevels = shuffleArray(selectedLevels);
+
+  const createdPaths = [];
+  for (let i = 0; i < orderedLevels.length; i++) {
+    const record = await prisma.teamPath.create({
+      data: {
+        teamId,
+        levelId: orderedLevels[i].id,
+        stepNumber: i + 1,
+      },
+    });
+    createdPaths.push(record);
+  }
+
+  return createdPaths;
+}
+
+/**
+ * Synchronized Game Kickoff:
+ * Distributes all registered teams across their starting clues.
+ * Generates randomized paths (9 intermediate clues each) from available campus landmarks (10-15).
  */
 export async function kickoffConflictFreeGame(io: Server, gameId: number) {
   const teams = await prisma.team.findMany({ orderBy: { id: 'asc' } });
@@ -31,7 +86,8 @@ export async function kickoffConflictFreeGame(io: Server, gameId: number) {
     throw new Error('No intermediate clues found. Please configure clues in the studio first.');
   }
 
-  // Clear existing progress for a fresh synchronized hunt
+  // Clear existing progress and paths for a fresh synchronized hunt
+  await prisma.teamPath.deleteMany({});
   await prisma.hintReveal.deleteMany({});
   await prisma.teamLevelProgress.deleteMany({});
   await prisma.teamLocation.deleteMany({});
@@ -39,53 +95,47 @@ export async function kickoffConflictFreeGame(io: Server, gameId: number) {
   await prisma.penalty.deleteMany({});
   await prisma.team.updateMany({ data: { finishedAt: null } });
 
-  // Shuffle intermediate levels to ensure random distribution
-  const shuffledLevels = shuffleArray(intermediateLevels);
+  // Generate paths and unlock starting clue for each team
+  for (const team of teams) {
+    const paths = await generateTeamPath(team.id, gameId, intermediateLevels, 9);
+    if (paths.length === 0) continue;
 
-  // Allocate 1 unique level to each team
-  for (let i = 0; i < teams.length; i++) {
-    const team = teams[i];
-    // Pick unique level; wrap around only if teams > levels
-    const chosenLevel = shuffledLevels[i % shuffledLevels.length];
+    const firstStep = paths[0];
+    const firstLevel = intermediateLevels.find((l) => l.id === firstStep.levelId);
+    if (!firstLevel) continue;
 
     const progress = await prisma.teamLevelProgress.create({
       data: {
         teamId: team.id,
-        levelId: chosenLevel.id,
+        levelId: firstLevel.id,
         stepNumber: 1,
         unlockedAt: new Date(),
       },
     });
 
-    if (chosenLevel.durationSecs) {
-      const deadline = progress.unlockedAt.getTime() + chosenLevel.durationSecs * 1000;
-      scheduleTeamLevelTimer(io, progress.id, team.id, chosenLevel.id, deadline);
-    }
-
-    // Emit live to team
+    // Emit starting clue to team
     io.to(`team:${team.id}`).emit('level:unlocked', {
-      levelId: chosenLevel.id,
+      levelId: firstLevel.id,
       stepNumber: 1,
       totalSteps: 10,
-      title: chosenLevel.title,
+      title: firstLevel.title,
       isFinal: false,
       unlockedAt: progress.unlockedAt,
     });
   }
 
-  // Broadcast occupancy update to admin desk
+  // Broadcast occupancy matrix to admin desk
   io.to('admin').emit('admin:occupancy_update', await getCampusOccupancyMatrix(gameId));
   return { teamsCount: teams.length, allocated: teams.length };
 }
 
 /**
- * Dynamic Conflict-Free Allocation Engine:
- * When a team solves their current clue, dynamically assigns their next clue from the
- * unvisited pool that is 100% UNOCCUPIED by any other team.
- * When a team reaches 9 solved clues, clue #10 automatically becomes the single common Grand Finale!
+ * Path-Based Dispatch Engine:
+ * When a team solves their current clue, unlocks their next assigned clue along their route.
+ * Once 9 intermediate clues are accomplished, automatically unlocks Step 10: Grand Finale!
  */
 export async function dispatchNextConflictFreeClue(io: Server, teamId: number, gameId: number) {
-  // Fetch all progress for this team
+  // Fetch all completed progress for this team
   const teamProgress = await prisma.teamLevelProgress.findMany({
     where: { teamId },
     include: { level: true },
@@ -146,46 +196,30 @@ export async function dispatchNextConflictFreeClue(io: Server, teamId: number, g
     return { finished: true, nextLevel: null, stepNumber: 10 };
   }
 
-  // Case 3: Team needs intermediate clue (Step 2 to Step 9)
+  // Case 3: Intermediate clue dispatch (Step 2 to Step 9)
   const nextStepNumber = completedCount + 1;
 
-  // All intermediate levels
-  const intermediateLevels = await prisma.level.findMany({
-    where: { gameId, isFinal: false },
+  // Ensure team path exists
+  let targetPath = await prisma.teamPath.findUnique({
+    where: { teamId_stepNumber: { teamId, stepNumber: nextStepNumber } },
+    include: { level: true },
   });
 
-  // Level IDs already visited or currently assigned to THIS team
-  const visitedLevelIds = new Set(teamProgress.map((p) => p.levelId));
-  const unvisitedLevels = intermediateLevels.filter((lvl) => !visitedLevelIds.has(lvl.id));
+  if (!targetPath) {
+    // If path was missing, generate it on-the-fly
+    const paths = await generateTeamPath(teamId, gameId, undefined, 9);
+    targetPath = await prisma.teamPath.findUnique({
+      where: { teamId_stepNumber: { teamId, stepNumber: nextStepNumber } },
+      include: { level: true },
+    });
+  }
 
-  if (unvisitedLevels.length === 0) {
-    // If somehow all intermediate levels were visited before step 9, proceed straight to finale
+  if (!targetPath) {
+    // If total available intermediate clues < 9 and team finished all of them, advance straight to finale!
     return dispatchNextConflictFreeClue(io, teamId, gameId);
   }
 
-  // Level IDs currently actively occupied by OTHER teams (in play, not yet completed)
-  const activeOtherProgress = await prisma.teamLevelProgress.findMany({
-    where: {
-      completedAt: null,
-      teamId: { not: teamId },
-    },
-    select: { levelId: true },
-  });
-  const occupiedLevelIds = new Set(activeOtherProgress.map((p) => p.levelId));
-
-  // Find completely free, unoccupied landmarks that this team has not visited
-  const freeUnoccupiedLevels = unvisitedLevels.filter((lvl) => !occupiedLevelIds.has(lvl.id));
-
-  // Pick target level: prefer free, unoccupied landmark to guarantee zero collision!
-  let chosenLevel = null;
-  if (freeUnoccupiedLevels.length > 0) {
-    // Pick randomly from free pool for uniform geographic dispersion across campus
-    const randomIndex = Math.floor(Math.random() * freeUnoccupiedLevels.length);
-    chosenLevel = freeUnoccupiedLevels[randomIndex];
-  } else {
-    // Graceful fallback: pick from unvisited with earliest unlocked time (least congested)
-    chosenLevel = unvisitedLevels[Math.floor(Math.random() * unvisitedLevels.length)];
-  }
+  const chosenLevel = targetPath.level;
 
   const nextProgress = await prisma.teamLevelProgress.create({
     data: {
@@ -195,11 +229,6 @@ export async function dispatchNextConflictFreeClue(io: Server, teamId: number, g
       unlockedAt: new Date(),
     },
   });
-
-  if (chosenLevel.durationSecs) {
-    const deadline = nextProgress.unlockedAt.getTime() + chosenLevel.durationSecs * 1000;
-    scheduleTeamLevelTimer(io, nextProgress.id, teamId, chosenLevel.id, deadline);
-  }
 
   io.to(`team:${teamId}`).emit('level:unlocked', {
     levelId: chosenLevel.id,
@@ -216,8 +245,8 @@ export async function dispatchNextConflictFreeClue(io: Server, teamId: number, g
 
 /**
  * Live Campus Occupancy Matrix:
- * Returns the live status of all clue landmarks and which team is currently occupying each one.
- * Powers the real-time collision-free monitor in the Admin Command Desk.
+ * Returns the status of all clue landmarks and which squads are currently investigating each one.
+ * Supports multiple squads per landmark (transparent congestion/occupancy view).
  */
 export async function getCampusOccupancyMatrix(gameId: number) {
   const levels = await prisma.level.findMany({

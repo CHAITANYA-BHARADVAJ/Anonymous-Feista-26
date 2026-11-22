@@ -7,7 +7,7 @@ import 'leaflet/dist/leaflet.css';
 import { useGameStore } from '../../stores/gameStore';
 import { useAuthStore } from '../../stores/authStore';
 import { useLocation } from '../../hooks/useLocation';
-import { useCountdown, formatMs } from '../../hooks/useCountdown';
+import { useCountdown, useStopwatch, formatMs } from '../../hooks/useCountdown';
 import { api } from '../../lib/api';
 import { disconnectSocket } from '../../lib/socket';
 import { computeDistanceMeters, computeBearingDegrees } from '../../lib/geo';
@@ -154,18 +154,28 @@ export default function PlayDashboard() {
     return computeBearingDegrees(pos.latitude, pos.longitude, targetLat, targetLng);
   }, [pos?.latitude, pos?.longitude, targetLat, targetLng]);
 
-  // Level Countdown
-  const levelDeadlineMs =
-    level?.durationSecs && currentLevel?.unlockedAt && game?.status === 'running'
-      ? new Date(currentLevel.unlockedAt).getTime() +
-        level.durationSecs * 1000 +
-        (game?.totalPausedMs ?? 0)
-      : null;
-
-  const levelRemaining = useCountdown(
-    levelDeadlineMs,
-    game?.pausedAt ? new Date(game.pausedAt).getTime() : null,
+  // Global Mission Stopwatch & Hint Penalties
+  const { elapsedMs, formatted: elapsedFormatted } = useStopwatch(
+    game?.startedAt,
+    game?.pausedAt,
+    game?.totalPausedMs ?? 0,
+    game?.endedAt,
   );
+
+  const totalHintPenaltiesMins = useMemo(() => {
+    let mins = 0;
+    for (const p of progress) {
+      if (p.level?.hints) {
+        const revealed = new Set(p.hintReveals?.map((hr) => hr.hintId) ?? []);
+        for (const h of p.level.hints) {
+          if (revealed.has(h.id)) {
+            mins += h.penaltyMins;
+          }
+        }
+      }
+    }
+    return mins;
+  }, [progress]);
 
   // Proximity Check-in Action
   async function triggerCheckIn() {
@@ -312,19 +322,26 @@ export default function PlayDashboard() {
           </div>
         </button>
 
-        {/* Center: Target Countdown Timer (if active) */}
-        {level?.durationSecs && !isCompleted && game?.status === 'running' && (
-          <div className="pointer-events-auto bg-zinc-950/85 backdrop-blur-xl border border-zinc-800 px-3 py-1.5 rounded-2xl shadow-2xl flex items-center gap-1.5">
-            <span className="text-[9px] font-mono text-zinc-400 uppercase tracking-wider font-bold">
-              LOCK
-            </span>
-            <span
-              className={`text-xs font-mono font-black tabular-nums tracking-tight ${
-                levelRemaining < 60000 ? 'text-rose-400 animate-pulse' : 'text-cyan-300'
-              }`}
-            >
-              {formatMs(levelRemaining)}
-            </span>
+        {/* Center: Mission Stopwatch (Counts UP from 00:00:00) */}
+        {game?.startedAt && (
+          <div className="pointer-events-auto bg-zinc-950/85 backdrop-blur-xl border border-zinc-800 px-3 py-1.5 rounded-2xl shadow-2xl flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
+              <span className={`w-1.5 h-1.5 rounded-full ${game.status === 'paused' ? 'bg-amber-400' : 'bg-emerald-400 animate-pulse'}`} />
+              <span className="text-[9px] font-mono text-zinc-400 uppercase tracking-wider font-bold">
+                {game.status === 'paused' ? 'PAUSED' : 'TIME'}
+              </span>
+              <span className="text-xs font-mono font-black tabular-nums tracking-tight text-white">
+                {elapsedFormatted}
+              </span>
+            </div>
+            {totalHintPenaltiesMins > 0 && (
+              <span
+                className="text-[9px] font-mono bg-amber-500/15 border border-amber-500/30 text-amber-300 px-1.5 py-0.5 rounded-md font-bold"
+                title="Hint Penalty Time added to finish score"
+              >
+                +{totalHintPenaltiesMins}m
+              </span>
+            )}
           </div>
         )}
 

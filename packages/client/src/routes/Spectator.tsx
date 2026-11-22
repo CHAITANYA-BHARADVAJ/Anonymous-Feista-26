@@ -1,11 +1,18 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { getSocket } from '../lib/socket';
-import { formatMs } from '../hooks/useCountdown';
+import { formatMs, useStopwatch } from '../hooks/useCountdown';
 import { toggleFullscreen, enableAutoFullscreenOnFirstGesture } from '../lib/fullscreen';
 
 export default function Spectator() {
   const [state, setState] = useState<any>(null);
+
+  const { formatted: elapsedFormatted } = useStopwatch(
+    state?.game?.startedAt,
+    state?.game?.pausedAt,
+    state?.game?.totalPausedMs ?? 0,
+    state?.game?.endedAt,
+  );
 
   useEffect(() => {
     const cleanupFs = enableAutoFullscreenOnFirstGesture();
@@ -72,11 +79,18 @@ export default function Spectator() {
           {state.game?.name ?? 'Campus Hunt'}
         </h1>
 
-        <span
-          className={`mt-2 px-5 py-1.5 rounded-full text-xs font-mono font-bold uppercase tracking-widest border ${statusStyle}`}
-        >
-          ● {state.game?.status ?? 'WAITING'}
-        </span>
+        <div className="flex items-center justify-center gap-3 mt-2">
+          <span
+            className={`px-5 py-1.5 rounded-full text-xs font-mono font-bold uppercase tracking-widest border ${statusStyle}`}
+          >
+            ● {state.game?.status ?? 'WAITING'}
+          </span>
+          {state.game?.startedAt && (
+            <span className="px-5 py-1.5 rounded-full text-xs font-mono font-black tabular-nums tracking-widest bg-white/5 border border-white/10 text-cyan-300">
+              ⏱ {elapsedFormatted}
+            </span>
+          )}
+        </div>
       </header>
 
       {/* Live Broadcast Ticker */}

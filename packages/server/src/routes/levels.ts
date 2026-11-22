@@ -40,6 +40,7 @@ router.post('/game/:gameId/generate-25-pack', requireAuth('admin'), async (req, 
 
     // Wipe prior levels safely
     await prisma.$transaction(async (tx) => {
+      await tx.teamPath.deleteMany({});
       await tx.hintReveal.deleteMany({});
       await tx.teamLevelProgress.deleteMany({});
       await tx.teamCheckpoint.deleteMany({});
@@ -215,7 +216,8 @@ router.delete('/:id', requireAuth('admin'), async (req, res) => {
         await tx.teamCheckpoint.deleteMany({ where: { checkpointId: { in: cpIds } } });
       }
 
-      // 3. Delete Team Level Progress (and any reveals attached)
+      // 3. Delete Team Level Progress and Team Paths (and any reveals attached)
+      await tx.teamPath.deleteMany({ where: { levelId: id } });
       const progress = await tx.teamLevelProgress.findMany({ where: { levelId: id }, select: { id: true } });
       const progIds = progress.map((p) => p.id);
       if (progIds.length > 0) {

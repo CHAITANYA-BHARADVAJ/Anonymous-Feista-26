@@ -19,7 +19,21 @@ router.get('/spectator/state', async (_req, res) => {
         take: 5,
       })
     : [];
-  res.json({ game: game ? { status: game.status, startedAt: game.startedAt, name: game.name } : null, rankings, announcements });
+  res.json({
+    game: game
+      ? {
+          id: game.id,
+          status: game.status,
+          startedAt: game.startedAt,
+          pausedAt: game.pausedAt,
+          totalPausedMs: game.totalPausedMs,
+          endedAt: game.endedAt,
+          name: game.name,
+        }
+      : null,
+    rankings,
+    announcements,
+  });
 });
 
 export default router;

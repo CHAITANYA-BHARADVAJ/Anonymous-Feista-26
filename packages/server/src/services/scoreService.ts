@@ -33,7 +33,7 @@ export async function buildLeaderboard(): Promise<TeamRanking[]> {
   const game = await prisma.game.findFirst({ orderBy: { id: 'desc' } });
   const teams = await prisma.team.findMany({
     include: {
-      levelProgress: { include: { level: true }, orderBy: { level: { orderIndex: 'desc' } } },
+      levelProgress: { include: { level: true }, orderBy: { stepNumber: 'desc' } },
       penalties: true,
       checkpoints: { include: { checkpoint: true } },
     },
@@ -41,7 +41,7 @@ export async function buildLeaderboard(): Promise<TeamRanking[]> {
 
   const rows: TeamRanking[] = teams.map((team) => {
     const finished = !!team.finishedAt;
-    const highestLevel = team.levelProgress[0]?.level?.orderIndex ?? 0;
+    const currentStep = team.levelProgress[0]?.stepNumber ?? 0;
 
     let adjustedTimeSecs: number | null = null;
     if (finished && game?.startedAt && team.finishedAt) {
@@ -58,7 +58,7 @@ export async function buildLeaderboard(): Promise<TeamRanking[]> {
       rank: 0,
       teamId: team.id,
       teamName: team.name,
-      currentLevel: highestLevel,
+      currentLevel: currentStep,
       adjustedTimeSecs,
       finished,
     };

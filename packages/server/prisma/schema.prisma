@@ -23,6 +23,7 @@ model Team {
   photos        Photo[]
   sosAlerts     SosAlert[]
   locations     TeamLocation[]
+  teamPaths     TeamPath[]
 }
 
 model TeamSession {
@@ -73,6 +74,7 @@ model Level {
   hints        Hint[]
   checkpoints  Checkpoint[]
   teamProgress TeamLevelProgress[]
+  teamPaths    TeamPath[]
 }
 
 model SocialLink {
@@ -124,6 +126,19 @@ model TeamLevelProgress {
   level       Level      @relation(fields: [levelId], references: [id])
   hintReveals HintReveal[]
 
+  @@unique([teamId, levelId])
+}
+
+model TeamPath {
+  id         Int      @id @default(autoincrement())
+  teamId     Int
+  levelId    Int
+  stepNumber Int
+
+  team  Team  @relation(fields: [teamId], references: [id])
+  level Level @relation(fields: [levelId], references: [id])
+
+  @@unique([teamId, stepNumber])
   @@unique([teamId, levelId])
 }
 

@@ -341,6 +341,9 @@ export default function AdminGame() {
             <span className="text-xl font-mono font-bold text-zinc-100 tabular-nums">
               {elapsedFormatted}
             </span>
+            <span className="text-[9px] font-mono text-zinc-500 border-l border-zinc-800 pl-2.5">
+              Target: 60m
+            </span>
           </div>
 
           <div className="flex items-center gap-1.5">
@@ -467,14 +470,14 @@ export default function AdminGame() {
             <div className="flex items-center gap-2">
               <span className="text-base font-bold text-white flex items-center gap-2">
                 <span>🛡️</span>
-                <span>Conflict-Free Campus Landmark Monitor</span>
+                <span>Campus Landmark Occupancy Monitor</span>
               </span>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-bold">
-                0 COLLISIONS
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 font-bold">
+                DISTRIBUTED PATHS
               </span>
             </div>
             <p className="text-xs text-zinc-400 mt-0.5 font-mono">
-              Real-time station occupancy: No two teams are ever routed to the same landmark simultaneously.
+              Real-time station occupancy: 9 intermediate landmarks per squad + Grand Finale.
             </p>
           </div>
 
@@ -495,7 +498,7 @@ export default function AdminGame() {
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 max-h-72 overflow-y-auto pr-1">
           {occupancyMatrix.map((station) => {
             const isOccupied = station.isOccupied;
-            const occupant = station.activeOccupants?.[0];
+            const occupants: any[] = station.activeOccupants ?? [];
 
             return (
               <div
@@ -513,20 +516,28 @@ export default function AdminGame() {
                     <span className="text-[10px] text-zinc-500 shrink-0">#{station.orderIndex}</span>
                     <span className="font-bold text-white truncate text-[11px]">{station.title}</span>
                   </div>
-                  {station.isFinal && (
+                  {station.isFinal ? (
                     <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 font-bold shrink-0">
                       FINALE
                     </span>
-                  )}
+                  ) : occupants.length > 1 ? (
+                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/30 text-amber-300 font-bold shrink-0">
+                      {occupants.length} SQUADS
+                    </span>
+                  ) : null}
                 </div>
 
-                <div className="flex items-center justify-between text-[11px] pt-1 border-t border-white/5">
-                  {isOccupied && occupant ? (
-                    <div className="flex items-center gap-1.5 text-amber-300 truncate">
-                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
-                      <span className="font-bold truncate">{occupant.teamName}</span>
-                      <span className="text-[9px] text-zinc-400 shrink-0">(Step {occupant.stepNumber}/10)</span>
-                    </div>
+                <div className="flex flex-col gap-1 text-[11px] pt-1 border-t border-white/5">
+                  {isOccupied && occupants.length > 0 ? (
+                    occupants.map((occ: any, oIdx: number) => (
+                      <div key={oIdx} className="flex items-center justify-between text-amber-300">
+                        <div className="flex items-center gap-1.5 truncate">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
+                          <span className="font-bold truncate text-[11px]">{occ.teamName}</span>
+                        </div>
+                        <span className="text-[9px] text-zinc-400 shrink-0">Step {occ.stepNumber}/10</span>
+                      </div>
+                    ))
                   ) : (
                     <span className="text-emerald-400 flex items-center gap-1 text-[10px]">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />

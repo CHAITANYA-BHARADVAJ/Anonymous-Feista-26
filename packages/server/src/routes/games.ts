@@ -40,6 +40,7 @@ router.patch('/:id/status', requireAuth('admin'), async (req, res) => {
   if (action === 'start') {
     // If game was ended or resetting, clean up prior completion timestamps
     await prisma.team.updateMany({ data: { finishedAt: null } });
+    await prisma.teamPath.deleteMany({});
     await prisma.hintReveal.deleteMany({});
     await prisma.teamLevelProgress.deleteMany({});
     await prisma.teamLocation.deleteMany({});
@@ -71,6 +72,7 @@ router.patch('/:id/status', requireAuth('admin'), async (req, res) => {
   } else if (action === 'reset') {
     update = { status: 'idle', startedAt: null, pausedAt: null, endedAt: null, totalPausedMs: 0 };
     await prisma.team.updateMany({ data: { finishedAt: null } });
+    await prisma.teamPath.deleteMany({});
     await prisma.hintReveal.deleteMany({});
     await prisma.teamLevelProgress.deleteMany({});
     await prisma.teamLocation.deleteMany({});
@@ -87,6 +89,7 @@ router.patch('/:id/status', requireAuth('admin'), async (req, res) => {
     startedAt: updated.startedAt,
     pausedAt: updated.pausedAt,
     endedAt: updated.endedAt,
+    totalPausedMs: updated.totalPausedMs,
   });
 
   const rankings = await buildLeaderboard();

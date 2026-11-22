@@ -34,6 +34,7 @@ export interface GameState {
   startedAt: string | null;
   pausedAt: string | null;
   totalPausedMs: number;
+  endedAt?: string | null;
   campusMapUrl?: string | null;
   campusMapBounds?: string | null;
   zones: any[];

@@ -45,13 +45,14 @@ router.post('/teams', requireAuth('admin'), async (req, res) => {
     },
   });
 
-  // If a game is currently running, unlock level 1 immediately for this newly registered team
+  // If a game is currently running, unlock step 1 immediately for this newly registered team
   const game = await prisma.game.findFirst({ orderBy: { id: 'desc' } });
   if (game && game.status === 'running') {
-    const level1 = await prisma.level.findFirst({ where: { gameId: game.id, orderIndex: 1 } });
-    if (level1) {
+    const { generateTeamPath } = await import('../services/dispatchService');
+    const paths = await generateTeamPath(team.id, game.id);
+    if (paths.length > 0) {
       await prisma.teamLevelProgress.create({
-        data: { teamId: team.id, levelId: level1.id, unlockedAt: new Date() },
+        data: { teamId: team.id, levelId: paths[0].levelId, stepNumber: 1, unlockedAt: new Date() },
       });
     }
   }
@@ -75,6 +76,7 @@ router.delete('/teams/:id', requireAuth('admin'), async (req, res) => {
 
   // Delete all cascades
   await prisma.teamSession.deleteMany({ where: { teamId } });
+  await prisma.teamPath.deleteMany({ where: { teamId } });
   const progIds = (await prisma.teamLevelProgress.findMany({ where: { teamId }, select: { id: true } })).map((p) => p.id);
   await prisma.hintReveal.deleteMany({ where: { progressId: { in: progIds } } });
   await prisma.teamLevelProgress.deleteMany({ where: { teamId } });
@@ -108,6 +110,7 @@ router.post('/teams/:id/reset', requireAuth('admin'), async (req, res) => {
     where: { teamId, revokedAt: null },
     data: { revokedAt: new Date() },
   });
+  await prisma.teamPath.deleteMany({ where: { teamId } });
   const resetProgIds = (await prisma.teamLevelProgress.findMany({ where: { teamId }, select: { id: true } })).map((p) => p.id);
   await prisma.hintReveal.deleteMany({ where: { progressId: { in: resetProgIds } } });
   await prisma.teamLevelProgress.deleteMany({ where: { teamId } });
@@ -123,10 +126,11 @@ router.post('/teams/:id/reset', requireAuth('admin'), async (req, res) => {
 
   const game = await prisma.game.findFirst({ orderBy: { id: 'desc' } });
   if (game && (game.status === 'running' || game.status === 'paused')) {
-    const level1 = await prisma.level.findFirst({ where: { gameId: game.id, orderIndex: 1 } });
-    if (level1) {
+    const { generateTeamPath } = await import('../services/dispatchService');
+    const paths = await generateTeamPath(team.id, game.id);
+    if (paths.length > 0) {
       await prisma.teamLevelProgress.create({
-        data: { teamId: team.id, levelId: level1.id, unlockedAt: new Date() },
+        data: { teamId: team.id, levelId: paths[0].levelId, stepNumber: 1, unlockedAt: new Date() },
       });
     }
   }
@@ -184,39 +188,13 @@ router.post('/teams/:id/force-unlock', requireAuth('admin'), async (req, res) =>
   const game = await prisma.game.findFirst({ orderBy: { id: 'desc' } });
   if (!game) { res.status(404).json({ error: 'No game' }); return; }
 
-  // Get current highest level for team
-  const progress = await prisma.teamLevelProgress.findMany({
-    where: { teamId },
-    include: { level: true },
-    orderBy: { level: { orderIndex: 'desc' } },
-  });
-
-  const currentOrder = progress[0]?.level?.orderIndex ?? 0;
-  const nextLevel = await prisma.level.findFirst({
-    where: { gameId: game.id, orderIndex: currentOrder + 1 },
-  });
-
-  if (!nextLevel) {
-    res.status(400).json({ error: 'No further levels to unlock' });
-    return;
-  }
-
-  const newProgress = await prisma.teamLevelProgress.upsert({
-    where: { teamId_levelId: { teamId, levelId: nextLevel.id } },
-    update: { unlockedAt: new Date() },
-    create: { teamId, levelId: nextLevel.id, unlockedAt: new Date() },
-  });
-
-  io.to(`team:${teamId}`).emit('level:unlocked', {
-    levelId: nextLevel.id,
-    orderIndex: nextLevel.orderIndex,
-    unlockedAt: newProgress.unlockedAt,
-  });
+  const { dispatchNextConflictFreeClue } = await import('../services/dispatchService');
+  const dispatch = await dispatchNextConflictFreeClue(io, teamId, game.id);
 
   const rankings = await buildLeaderboard();
   io.to(`game:${game.id}`).emit('leaderboard:updated', { rankings });
 
-  res.json({ ok: true, unlockedLevel: nextLevel });
+  res.json({ ok: true, unlockedLevel: dispatch.nextLevel, stepNumber: dispatch.stepNumber, finished: dispatch.finished });
 });
 
 // Admin emergency override: Force complete current level for team
@@ -228,7 +206,7 @@ router.post('/teams/:id/force-complete', requireAuth('admin'), async (req, res) 
   const activeProgress = await prisma.teamLevelProgress.findFirst({
     where: { teamId, completedAt: null },
     include: { level: true },
-    orderBy: { level: { orderIndex: 'asc' } },
+    orderBy: { stepNumber: 'asc' },
   });
 
   if (!activeProgress) {
@@ -241,26 +219,13 @@ router.post('/teams/:id/force-complete', requireAuth('admin'), async (req, res) 
     data: { completedAt: new Date(), completedBy: 'admin_override' },
   });
 
-  // Unlock next
-  const nextLevel = await prisma.level.findFirst({
-    where: { gameId: game.id, orderIndex: activeProgress.level.orderIndex + 1 },
-  });
-
-  if (nextLevel) {
-    const nextProg = await prisma.teamLevelProgress.create({
-      data: { teamId, levelId: nextLevel.id, unlockedAt: new Date() },
-    });
-    io.to(`team:${teamId}`).emit('level:unlocked', {
-      levelId: nextLevel.id,
-      orderIndex: nextLevel.orderIndex,
-      unlockedAt: nextProg.unlockedAt,
-    });
-  }
+  const { dispatchNextConflictFreeClue } = await import('../services/dispatchService');
+  const dispatch = await dispatchNextConflictFreeClue(io, teamId, game.id);
 
   const rankings = await buildLeaderboard();
   io.to(`game:${game.id}`).emit('leaderboard:updated', { rankings });
 
-  res.json({ ok: true, completedLevel: activeProgress.level, nextLevelId: nextLevel?.id ?? null });
+  res.json({ ok: true, completedLevel: activeProgress.level, nextLevelId: dispatch.nextLevel?.id ?? null, finished: dispatch.finished });
 });
 
 // Update campus map graphic settings

@@ -1,8 +1,8 @@
 # 🎯 PROJECT_STATE — Campus Hunt SDMCET (Anonymous-Feista-26)
 
-**Last Updated:** November 21, 2026, 22:38 IST  
+**Last Updated:** November 22, 2026, 11:35 IST  
 **Branch:** `feat/initial-implementation`  
-**Status:** All requested features implemented, type checks verified clean, dev servers active.
+**Status:** Shuffled-subset clue distribution (10-15 locations for 25 squads) & global upward stopwatch timer engine implemented. All type checks clean.
 **Repository:** [Anonymous-Feista-26](https://github.com/CHAITANYA-BHARADVAJ/Anonymous-Feista-26)  
 **Host Organization:** Anonymous Club — SDMCET (Shri Dharmasthala Manjunatheshwara College of Engineering and Technology, Dharwad, Karnataka 580002)
 
@@ -110,7 +110,9 @@ adjusted_time = (finish_ts − game_start_ts − total_paused_ms)
               + zone_penalties
               − checkpoint_bonuses
 ```
-- **Timer Recovery:** Active level countdowns are backed by database timestamps (`unlockedAt` + `durationSecs`). If the Docker container restarts mid-hunt, `rescheduleTimers()` automatically queries active teams and restores scheduled timeouts.
+- **Global Stopwatch Engine:** Clocks count UP from `00:00:00` for all squads starting at `game.startedAt`. Teams advance by solving clues at their own pace without arbitrary timeout auto-advances. Lowest finish time + penalties wins.
+- **Penalty Accumulation:** Using hints incurs explicit time penalties (+2m, +4m, +6m), and restricted zone violations add trespass penalties to the official adjusted time.
+- **Global Pause & Soft Limit:** Pausing freezes all teams' clocks simultaneously via `totalPausedMs`. The 60-minute duration is an advisory soft limit; gameplay continues until event coordinators officially stop/end the hunt.
 - **Privacy Enforcement:** Team GPS coordinates are broadcast exclusively to the `admin` room; participant and spectator sockets never receive other teams' positions.
 
 ---
@@ -194,12 +196,12 @@ docker compose run --rm app npx tsx /app/packages/server/prisma/seed.ts
   - **Floating Minimizable Action Sheet:** Smooth peek mode (minimal bar so players see full map) expanding into full intelligence briefing, campus guidance, tactical assistance hints (with +2m, +4m, +6m penalty confirmations), decoded solution submission, and finale camera capture.
   - **Participant Leaderboard Removal:** Completely removed the leaderboard from the participant portal so teams remain focused on their own mission without distractions.
   - **Operative Dossier Modal:** Instant access to team call-sign, cleared stages, hint counters, hardware diagnostics (GPS, WebSockets), and field terminal sign out.
-- [x] Dynamic Conflict-Free Allocation Engine (25 Teams × 10 Clues with Zero Overlap):
-  - **Dynamic Dispatcher (`dispatchService.ts`):** 25 intermediate landmark stations + 1 common Grand Finale station (26 total). At synchronized kickoff, all 25 teams are simultaneously distributed across unique starting stations with zero collision.
-  - **Live Dynamic Re-Routing:** When a team solves their clue (Steps 1–9), the engine queries all landmarks the team has not visited and filters out all landmarks currently occupied by other teams, dynamically allocating an unoccupied landmark.
-  - **Common Grand Finale:** Upon completing 9 intermediate clues, every team's 10th objective automatically locks to the single common Grand Finale at the Central Amphitheatre for live photo verification and sprint finish.
-  - **Live Campus Landmark Occupancy Monitor:** Admin Command Desk displays a live real-time matrix of all 26 campus stations, showing which squad is at which landmark and guaranteeing a verified 0-collision count.
-  - **1-Click 26-Station Pack Generator:** Instant seeding of all 26 SDMCET Dharwad campus landmark coordinates in the Map Studio.
+- [x] Shuffled-Subset Clue Distribution Engine (10–15 Physical Landmarks × 25 Teams):
+  - **Path Dispatcher (`dispatchService.ts`):** Supports 10–15 physical campus landmarks for up to 25 competing squads. Each squad is assigned a balanced subset of 9 intermediate clues, shuffled via Fisher-Yates into a unique progression path (`TeamPath`).
+  - **Collisions Handled Transparently:** Multiple squads can explore the same physical landmark at different times or simultaneously, removing the hard constraint of needing 25+ distinct stations across campus.
+  - **Common Grand Finale:** Upon completing all 9 assigned intermediate clues, every squad's 10th objective automatically locks to the single common Grand Finale at the Central Amphitheatre for live photo verification and podium sprint.
+  - **Live Campus Landmark Occupancy Monitor:** Admin Command Desk displays a live real-time matrix of all stations, showing active occupant squad counts and identities per landmark.
+  - **Upward Stopwatch HUD:** Participants and spectators see the global elapsed time counting UP, with hint penalty accumulation (+2m, +4m, +6m) clearly badged. Lowest adjusted finish time takes 1st place on the podium.
 - [x] Public Squad Self-Registration Portal (`/register`):
   - **Self-Service Enrolment:** Teams self-register with Team Call-Sign, Squad Leader Name, Mobile/WhatsApp, and custom Access Passcode.
   - **Capacity Controls:** Real-time capacity bar (up to 25 squads max), registration open/closed toggle in admin desk, and duplicate call-sign prevention.
