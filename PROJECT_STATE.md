@@ -212,4 +212,8 @@ docker compose run --rm app npx tsx /app/packages/server/prisma/seed.ts
   - **Non-Blocking In-App Modals:** Replaced native browser `window.confirm` (which is blocked or suppressed in modern browsers/PWAs) with sleek, unblockable dark-zinc confirmation modals for destructive directives (End Event and Reset).
   - **Global WebSocket Synchronization:** Game status changes broadcast globally across `game:status_changed` and `game:status` to all connected screens (Command Desk, Live Field Radar, Participant HUD, and Spectator displays) with full timing payloads.
   - **Field Action Enforcement:** When paused or ended, participant clue submissions, hint reveals, and GPS checkpoint unlocks are strictly rejected with tactical freeze notices; participant HUDs display a prominent pulsating pause/concluded banner.
+- [x] Emergency Squad Overrides & Stage Jump Engine:
+  - **Bypass GPS (`POST /admin/teams/:id/bypass-gps`):** 1-click rescue for squads whose phone GPS jitters or fails to trigger geofence at physical landmarks. Instantly marks location reached, decrypts the clue on their screen via WebSocket (`clue:decrypted`), and displays decrypted intelligence. Available in both Command Desk and Live Field Radar popup.
+  - **Force Advance (`POST /admin/teams/:id/force-advance`):** Forcibly marks active clue as solved by admin override and seamlessly dispatches the next clue along the squad's shuffled route.
+  - **Direct Stage Jump (`POST /admin/teams/:id/jump-stage`):** Admin stage picker modal enabling coordinators to jump any squad directly to any specific stage (Stage 1 through Stage 10 Finale), resolving target paths automatically.
 - [x] Docker multi-stage containerization, Caddy SSL automation, and EC2 documentation.
