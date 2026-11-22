@@ -63,6 +63,18 @@ export default function AdminLayout() {
       badgeColor: 'bg-rose-500/20 text-rose-400 border border-rose-500/40',
     },
     {
+      to: 'map',
+      label: 'Live Field Map',
+      sublabel: 'Real-Time Squad GPS Tracking',
+      icon: (
+        <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <circle cx="12" cy="12" r="9" strokeWidth={1.75} />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M12 3v18M3 12h18" />
+          <circle cx="12" cy="12" r="3.5" strokeWidth={1.75} />
+        </svg>
+      ),
+    },
+    {
       to: 'teams',
       label: 'Teams & Roster',
       sublabel: 'Credentials & Passwords',

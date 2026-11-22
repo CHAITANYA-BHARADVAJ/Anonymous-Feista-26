@@ -405,6 +405,14 @@ export default function AdminGame() {
             >
               Reset
             </button>
+
+            <NavLink
+              to="/admin/map"
+              className="px-3.5 py-2 rounded-xl bg-cyan-950/60 hover:bg-cyan-900/80 text-cyan-300 font-semibold text-xs border border-cyan-500/40 transition-all min-h-[38px] flex items-center gap-1.5 shadow-lg shadow-cyan-950/50"
+            >
+              <span>🗺️</span>
+              <span>Live Field Radar →</span>
+            </NavLink>
           </div>
         </div>
       </div>

@@ -15,8 +15,21 @@ export async function handleLocationUpdate(
   // Store location
   await prisma.teamLocation.create({ data: { teamId, lat, lng, recordedAt: new Date() } });
 
+  // Fetch team details for live admin stream
+  const team = await prisma.team.findUnique({
+    where: { id: teamId },
+    select: { id: true, name: true, leaderName: true },
+  });
+
   // Broadcast to admin
-  io.to('admin').emit('admin:team_location', { teamId, lat, lng, recordedAt: new Date() });
+  io.to('admin').emit('admin:team_location', {
+    teamId,
+    teamName: team?.name,
+    leaderName: team?.leaderName,
+    lat,
+    lng,
+    recordedAt: new Date(),
+  });
 
   // Check restricted zones
   const zones = await prisma.mapZone.findMany({

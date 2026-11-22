@@ -12,6 +12,7 @@ const Spectator = lazy(() => import('./routes/Spectator'));
 const PlayDashboard = lazy(() => import('./routes/play/PlayDashboard'));
 const AdminLayout = lazy(() => import('./routes/admin/AdminLayout'));
 const AdminGame = lazy(() => import('./routes/admin/AdminGame'));
+const AdminMap = lazy(() => import('./routes/admin/AdminMap'));
 const AdminTeams = lazy(() => import('./routes/admin/AdminTeams'));
 const AdminLevels = lazy(() => import('./routes/admin/AdminLevels'));
 const AdminPhotos = lazy(() => import('./routes/admin/AdminPhotos'));
@@ -57,6 +58,7 @@ function AppInner() {
         }>
           <Route index element={<Navigate to="game" replace />} />
           <Route path="game" element={<AdminGame />} />
+          <Route path="map" element={<AdminMap />} />
           <Route path="teams" element={<AdminTeams />} />
           <Route path="levels" element={<AdminLevels />} />
           <Route path="photos" element={<AdminPhotos />} />
