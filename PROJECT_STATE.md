@@ -207,4 +207,9 @@ docker compose run --rm app npx tsx /app/packages/server/prisma/seed.ts
   - **Self-Service Enrolment:** Teams self-register with Team Call-Sign, Squad Leader Name, Mobile/WhatsApp, and custom Access Passcode.
   - **Capacity Controls:** Real-time capacity bar (up to 25 squads max), registration open/closed toggle in admin desk, and duplicate call-sign prevention.
   - **Pre-Kickoff Standby HUD:** Registered teams enter a tactical waiting room with live GPS sensor diagnostics, automatically unlocking their starting clue when Event Control initiates the synchronized kickoff.
+- [x] Resilient Event State Orchestration (Pause, Resume, End, Reset):
+  - **Idempotent State Machine:** Backend `PATCH /api/v1/games/:id/status` and `/api/v1/games/status` handle double clicks, re-entrant pause/resume, and end calls safely without throwing HTTP 400 errors.
+  - **Non-Blocking In-App Modals:** Replaced native browser `window.confirm` (which is blocked or suppressed in modern browsers/PWAs) with sleek, unblockable dark-zinc confirmation modals for destructive directives (End Event and Reset).
+  - **Global WebSocket Synchronization:** Game status changes broadcast globally across `game:status_changed` and `game:status` to all connected screens (Command Desk, Live Field Radar, Participant HUD, and Spectator displays) with full timing payloads.
+  - **Field Action Enforcement:** When paused or ended, participant clue submissions, hint reveals, and GPS checkpoint unlocks are strictly rejected with tactical freeze notices; participant HUDs display a prominent pulsating pause/concluded banner.
 - [x] Docker multi-stage containerization, Caddy SSL automation, and EC2 documentation.
