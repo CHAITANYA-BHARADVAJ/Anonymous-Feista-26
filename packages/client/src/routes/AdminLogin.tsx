@@ -23,8 +23,8 @@ export default function AdminLogin() {
     setLoading(true);
     requestFullscreen().catch(() => {});
     try {
-      await api.adminLogin(username, password);
-      setAdmin('');
+      const res = await api.adminLogin(username, password);
+      setAdmin(res?.token || '');
       navigate('/admin/game');
     } catch (err: any) {
       setError(err.message ?? 'Invalid administrator credentials');

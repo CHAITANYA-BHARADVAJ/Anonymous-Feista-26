@@ -180,6 +180,10 @@ export default function PlayDashboard() {
   // Proximity Check-in Action
   async function triggerCheckIn() {
     if (!currentLevel || !level || !pos || checkInLoading) return;
+    if (game?.status !== 'running') {
+      alert(game?.status === 'paused' ? 'Hunt is temporarily PAUSED by Event Control.' : 'Hunt has concluded.');
+      return;
+    }
     setCheckInLoading(true);
     try {
       await api.reachLocation(level.id, pos.latitude, pos.longitude);
@@ -213,6 +217,10 @@ export default function PlayDashboard() {
   async function submitAnswer(e: React.FormEvent) {
     e.preventDefault();
     if (!currentLevel || !level) return;
+    if (game?.status !== 'running') {
+      setAnswerError(game?.status === 'paused' ? 'Hunt is temporarily PAUSED by Event Control.' : 'Hunt has officially concluded.');
+      return;
+    }
     setAnswerError('');
     setAnswerLoading(true);
     try {
@@ -233,6 +241,10 @@ export default function PlayDashboard() {
   // Reveal Hint
   async function useHint(hint: { id: number; orderIndex: number; penaltyMins: number }) {
     if (!currentLevel || !level || revealedHintIds.has(hint.id)) return;
+    if (game?.status !== 'running') {
+      alert(game?.status === 'paused' ? 'Hunt is temporarily PAUSED by Event Control.' : 'Hunt has concluded.');
+      return;
+    }
     const freeHint = currentLevel.hintsUsed < (currentLevel.hintReveals.length - revealedHintIds.size + 1);
     const penalty = freeHint ? 0 : hint.penaltyMins;
     const msg =
@@ -398,6 +410,43 @@ export default function PlayDashboard() {
           )}
         </div>
       </div>
+
+      {/* TACTICAL PAUSE / CONCLUSION MISSION OVERLAY FOR SQUADS */}
+      {game?.status === 'paused' && (
+        <div className="absolute inset-x-3 top-16 z-[960] max-w-sm mx-auto bg-amber-950/95 border-2 border-amber-500 backdrop-blur-2xl rounded-2xl p-3.5 shadow-2xl flex items-center gap-3 animate-pulse">
+          <span className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-lg shrink-0">
+            ⏸
+          </span>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-mono font-black text-amber-300 uppercase tracking-wider">
+                Timers Paused by Command Desk
+              </span>
+            </div>
+            <p className="text-[10px] font-mono text-amber-200/90 leading-tight mt-0.5">
+              Mission operations temporarily frozen. Stand by at your current landmark.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {game?.status === 'ended' && (
+        <div className="absolute inset-x-3 top-16 z-[960] max-w-sm mx-auto bg-zinc-950/95 border-2 border-emerald-500 backdrop-blur-2xl rounded-2xl p-3.5 shadow-2xl flex items-center gap-3">
+          <span className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-lg shrink-0">
+            🏁
+          </span>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-mono font-black text-emerald-300 uppercase tracking-wider">
+                Campus Hunt Concluded
+              </span>
+            </div>
+            <p className="text-[10px] font-mono text-zinc-300 leading-tight mt-0.5">
+              All timings locked. Report to the Start Venue for final rankings & ceremony.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* =========================================================================
           FULLSCREEN SATELLITE MAP (CORE VIEWPORT)

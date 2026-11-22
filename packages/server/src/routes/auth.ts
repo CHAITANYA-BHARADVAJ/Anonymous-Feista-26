@@ -189,7 +189,7 @@ router.post('/admin/login', async (req, res) => {
 
   const { token } = signToken(0, 'admin');
   res.cookie('ch_token', token, COOKIE_OPTS);
-  res.json({ role: 'admin' });
+  res.json({ role: 'admin', token });
 });
 
 // Logout

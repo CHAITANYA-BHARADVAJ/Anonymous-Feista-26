@@ -9,6 +9,22 @@ import { dispatchNextConflictFreeClue } from '../services/dispatchService';
 
 const router = Router();
 
+async function checkGameRunning(res: any): Promise<boolean> {
+  const game = await prisma.game.findFirst({ orderBy: { id: 'desc' } });
+  if (!game || game.status !== 'running') {
+    res.status(403).json({
+      error: game?.status === 'paused'
+        ? 'Hunt is temporarily PAUSED by Event Control. Field operations and timers are frozen.'
+        : game?.status === 'ended'
+        ? 'Hunt has officially CONCLUDED. Please report to the start venue.'
+        : 'Hunt has not started yet. Standby for official launch.',
+      status: game?.status ?? 'idle',
+    });
+    return false;
+  }
+  return true;
+}
+
 function getDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371e3; // Earth's radius in meters
   const toRad = (x: number) => (x * Math.PI) / 180;
@@ -50,6 +66,7 @@ router.get('/game', requireAuth('team'), async (req: AuthRequest, res) => {
 
 // Check GPS location and trigger clue drop
 router.post('/levels/:id/reach-location', requireAuth('team'), async (req: AuthRequest, res) => {
+  if (!(await checkGameRunning(res))) return;
   const teamId = req.user!.sub;
   const levelId = Number(req.params.id);
   const { lat, lng } = req.body as { lat?: number; lng?: number };
@@ -107,6 +124,7 @@ router.post('/levels/:id/reach-location', requireAuth('team'), async (req: AuthR
 
 // Submit level answer
 router.post('/levels/:id/answer', requireAuth('team'), async (req: AuthRequest, res) => {
+  if (!(await checkGameRunning(res))) return;
   const teamId = req.user!.sub;
   const levelId = Number(req.params.id);
   const { answer } = req.body as { answer: string };
@@ -150,6 +168,7 @@ router.post('/levels/:id/answer', requireAuth('team'), async (req: AuthRequest, 
 
 // Reveal hint
 router.post('/levels/:id/hints/:hintOrder/reveal', requireAuth('team'), async (req: AuthRequest, res) => {
+  if (!(await checkGameRunning(res))) return;
   const teamId = req.user!.sub;
   const levelId = Number(req.params.id);
   const hintOrder = Number(req.params.hintOrder);
@@ -202,6 +221,7 @@ router.post('/levels/:id/hints/:hintOrder/reveal', requireAuth('team'), async (r
 
 // Claim checkpoint
 router.post('/checkpoints/:id/claim', requireAuth('team'), async (req: AuthRequest, res) => {
+  if (!(await checkGameRunning(res))) return;
   const teamId = req.user!.sub;
   const checkpointId = Number(req.params.id);
   const { qrPayload, answer } = req.body as { qrPayload?: string; answer?: string };

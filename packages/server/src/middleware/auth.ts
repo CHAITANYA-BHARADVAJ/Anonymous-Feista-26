@@ -8,7 +8,10 @@ export interface AuthRequest extends Request {
 
 export function requireAuth(role?: 'team' | 'admin') {
   return async (req: AuthRequest, res: Response, next: NextFunction) => {
-    const token = req.cookies?.ch_token as string | undefined;
+    let token = req.cookies?.ch_token as string | undefined;
+    if (!token && req.headers.authorization?.startsWith('Bearer ')) {
+      token = req.headers.authorization.split(' ')[1];
+    }
     if (!token) {
       res.status(401).json({ error: 'Not authenticated' });
       return;

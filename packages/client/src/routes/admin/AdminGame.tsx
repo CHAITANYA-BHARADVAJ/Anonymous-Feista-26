@@ -11,6 +11,8 @@ export default function AdminGame() {
   const [pendingPhotosCount, setPendingPhotosCount] = useState<number>(0);
   const [occupancyMatrix, setOccupancyMatrix] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [actionRunning, setActionRunning] = useState<string | null>(null);
+  const [confirmAction, setConfirmAction] = useState<'end' | 'reset' | null>(null);
   const [actionLoadingTeamId, setActionLoadingTeamId] = useState<number | null>(null);
 
   // Live Activity Log
@@ -56,11 +58,15 @@ export default function AdminGame() {
     reload();
     const socket = getSocket();
 
-    socket.on('game:status_changed', (data: any) => {
-      setGame((g: any) => (g ? { ...g, ...data } : g));
-      addLog(`Event status changed to: ${data.status.toUpperCase()}`, 'info');
+    const handleStatus = (data: any) => {
+      const statusData = data.game || data;
+      setGame((g: any) => (g ? { ...g, ...statusData } : statusData));
+      addLog(`Event status changed to: ${(statusData.status || '').toUpperCase()}`, 'info');
       reload();
-    });
+    };
+
+    socket.on('game:status_changed', handleStatus);
+    socket.on('game:status', handleStatus);
 
     socket.on('sos:received', (alert: any) => {
       setSos((prev) => [alert, ...prev.filter((s) => s.id !== alert.id)]);
@@ -96,7 +102,8 @@ export default function AdminGame() {
     });
 
     return () => {
-      socket.off('game:status_changed');
+      socket.off('game:status_changed', handleStatus);
+      socket.off('game:status', handleStatus);
       socket.off('sos:received');
       socket.off('sos:resolved');
       socket.off('admin:photo_submitted');
@@ -109,46 +116,48 @@ export default function AdminGame() {
   async function reload() {
     try {
       const [games, teamsData, sosData, photosData] = await Promise.all([
-        api.getGames(),
-        api.getAdminTeams(),
-        api.getSosAlerts(),
+        api.getGames().catch(() => []),
+        api.getAdminTeams().catch(() => []),
+        api.getSosAlerts().catch(() => []),
         api.getAdminPhotos().catch(() => []),
       ]);
 
-      const activeGame = games[0] ?? null;
-      setGame(activeGame);
-      setTeams(teamsData);
-      setSos(sosData);
-      setPendingPhotosCount(photosData.filter((p: any) => p.status === 'pending').length);
+      const activeGame = games?.[0] ?? null;
+      if (activeGame) {
+        setGame(activeGame);
+      }
+      setTeams(teamsData || []);
+      setSos(sosData || []);
+      setPendingPhotosCount((photosData || []).filter((p: any) => p.status === 'pending').length);
 
       if (activeGame) {
-        const lvlData = await api.getLevels(activeGame.id);
-        setLevels(lvlData.sort((a, b) => a.orderIndex - b.orderIndex));
+        const lvlData = await api.getLevels(activeGame.id).catch(() => []);
+        setLevels((lvlData || []).sort((a: any, b: any) => a.orderIndex - b.orderIndex));
         const occData = await api.getOccupancyMatrix(activeGame.id).catch(() => []);
-        setOccupancyMatrix(occData);
+        setOccupancyMatrix(occData || []);
       }
     } catch (err) {
       console.error('Error reloading command desk state:', err);
     }
   }
 
-  async function handleGameAction(action: string) {
-    if (!game) return;
-    if (action === 'end' && !confirm('Are you sure you want to officially END the hunt for all teams?')) {
-      return;
-    }
-    if (action === 'reset' && !confirm('Reset all teams and timers to initial idle state?')) {
-      return;
-    }
-
-    setLoading(true);
+  async function executeGameAction(action: string) {
+    setActionRunning(action);
+    setConfirmAction(null);
     try {
-      await api.patchGameStatus(game.id, action);
+      addLog(`Transmitting game directive: ${action.toUpperCase()}...`, 'info');
+      const updated: any = await api.patchGameStatus(game?.id, action);
+      if (updated) {
+        setGame((g: any) => ({ ...(g || {}), ...updated }));
+        addLog(`Directive applied successfully: ${(updated.status || action).toUpperCase()}`, 'success');
+      }
       await reload();
     } catch (err: any) {
-      alert(err.message ?? 'Game action failed');
+      console.error('Game action failed:', err);
+      addLog(`Action failed (${action}): ${err.message}`, 'alert');
+      alert(`Game Action Failed: ${err.message ?? 'Unknown error'}`);
     } finally {
-      setLoading(false);
+      setActionRunning(null);
     }
   }
 
@@ -349,57 +358,60 @@ export default function AdminGame() {
           <div className="flex items-center gap-1.5">
             {game?.status === 'idle' && (
               <button
-                onClick={() => handleGameAction('start')}
-                disabled={loading}
-                className="px-4 py-2 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 font-semibold text-xs transition-all min-h-[38px]"
+                onClick={() => executeGameAction('start')}
+                disabled={Boolean(actionRunning)}
+                className="px-4 py-2 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 font-semibold text-xs transition-all min-h-[38px] flex items-center gap-1.5 shadow-md shadow-white/5"
               >
-                Start Event
+                {actionRunning === 'start' ? 'Starting…' : 'Start Event'}
               </button>
             )}
 
             {game?.status === 'running' && (
               <button
-                onClick={() => handleGameAction('pause')}
-                disabled={loading}
-                className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-medium text-xs border border-zinc-700 transition-all min-h-[38px]"
+                onClick={() => executeGameAction('pause')}
+                disabled={Boolean(actionRunning)}
+                className="px-3.5 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-semibold text-xs border border-amber-500/50 transition-all min-h-[38px] flex items-center gap-1.5 shadow-lg shadow-amber-950/40"
               >
-                Pause Timers
+                <span>⏸</span>
+                <span>{actionRunning === 'pause' ? 'Pausing…' : 'Pause Timers'}</span>
               </button>
             )}
 
             {game?.status === 'paused' && (
               <button
-                onClick={() => handleGameAction('resume')}
-                disabled={loading}
-                className="px-4 py-2 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 font-semibold text-xs transition-all min-h-[38px]"
+                onClick={() => executeGameAction('resume')}
+                disabled={Boolean(actionRunning)}
+                className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-xs transition-all min-h-[38px] flex items-center gap-1.5 shadow-lg shadow-emerald-950/40"
               >
-                Resume Timers
+                <span>▶</span>
+                <span>{actionRunning === 'resume' ? 'Resuming…' : 'Resume Timers'}</span>
               </button>
             )}
 
             {(game?.status === 'running' || game?.status === 'paused') && (
               <button
-                onClick={() => handleGameAction('end')}
-                disabled={loading}
-                className="px-3.5 py-2 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 font-medium text-xs border border-rose-800/50 transition-all min-h-[38px]"
+                onClick={() => setConfirmAction('end')}
+                disabled={Boolean(actionRunning)}
+                className="px-3.5 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 font-bold text-xs border border-rose-700/60 transition-all min-h-[38px] flex items-center gap-1.5 shadow-lg shadow-rose-950/50"
               >
-                End Event
+                <span>⏹</span>
+                <span>{actionRunning === 'end' ? 'Ending…' : 'End Event'}</span>
               </button>
             )}
 
             {game?.status === 'ended' && (
               <button
-                onClick={() => handleGameAction('start')}
-                disabled={loading}
-                className="px-4 py-2 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 font-semibold text-xs transition-all min-h-[38px]"
+                onClick={() => executeGameAction('start')}
+                disabled={Boolean(actionRunning)}
+                className="px-4 py-2 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 font-semibold text-xs transition-all min-h-[38px] flex items-center gap-1.5"
               >
-                Relaunch
+                {actionRunning === 'start' ? 'Launching…' : 'Relaunch'}
               </button>
             )}
 
             <button
-              onClick={() => handleGameAction('reset')}
-              disabled={loading}
+              onClick={() => setConfirmAction('reset')}
+              disabled={Boolean(actionRunning)}
               className="px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 text-xs font-mono border border-zinc-800 transition-all min-h-[38px]"
               title="Reset game state"
             >
@@ -960,6 +972,56 @@ export default function AdminGame() {
                 className="flex-1 py-2 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold"
               >
                 Send Nudge
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* NON-BLOCKING IN-APP CONFIRMATION MODAL (Never suppressed by browser pop-up blockers) */}
+      {confirmAction && (
+        <div className="fixed inset-0 z-[9999] bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-zinc-700 rounded-3xl p-6 max-w-md w-full shadow-2xl flex flex-col gap-4 text-zinc-100 animate-in fade-in zoom-in-95">
+            <div className="flex items-center gap-3">
+              <span className="w-10 h-10 rounded-2xl bg-rose-950 border border-rose-500/50 flex items-center justify-center text-xl shrink-0">
+                {confirmAction === 'end' ? '⏹' : '⚠️'}
+              </span>
+              <div>
+                <h3 className="text-base font-bold text-white">
+                  {confirmAction === 'end' ? 'Conclude Campus Hunt 2026?' : 'Reset All Progress to Standby?'}
+                </h3>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  {confirmAction === 'end'
+                    ? 'Official Field Action Directive'
+                    : 'Emergency System Reset'}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-zinc-300 leading-relaxed font-mono bg-zinc-950 p-3.5 rounded-xl border border-zinc-800">
+              {confirmAction === 'end'
+                ? 'Are you sure you want to officially END the hunt for all squads? All timers and field operations will freeze immediately, and final leaderboard standings will be permanently locked.'
+                : 'Are you sure you want to RESET all teams, paths, scores, and timers back to initial idle standby? This will wipe the active session.'}
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-800">
+              <button
+                type="button"
+                onClick={() => setConfirmAction(null)}
+                className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => executeGameAction(confirmAction)}
+                className={`px-4 py-2 rounded-xl font-bold text-xs transition-all shadow-lg ${
+                  confirmAction === 'end'
+                    ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-950/80'
+                    : 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-950/80'
+                }`}
+              >
+                {confirmAction === 'end' ? 'Yes, Conclude Hunt' : 'Yes, Reset State'}
               </button>
             </div>
           </div>

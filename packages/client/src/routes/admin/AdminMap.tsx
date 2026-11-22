@@ -186,10 +186,13 @@ export default function AdminMap() {
     socket.on('team:checkpoint_reached', () => reloadTeams());
     socket.on('level:unlocked', () => reloadTeams());
     socket.on('winner:declared', () => reloadTeams());
-    socket.on('game:status_changed', (data: any) => {
-      setGame((g: any) => (g ? { ...g, ...data } : g));
+    const handleStatusUpdate = (data: any) => {
+      const statusData = data.game || data;
+      setGame((g: any) => (g ? { ...g, ...statusData } : statusData));
       reloadTeams();
-    });
+    };
+    socket.on('game:status_changed', handleStatusUpdate);
+    socket.on('game:status', handleStatusUpdate);
 
     return () => {
       socket.off('admin:team_location');
@@ -198,15 +201,16 @@ export default function AdminMap() {
       socket.off('team:checkpoint_reached');
       socket.off('level:unlocked');
       socket.off('winner:declared');
-      socket.off('game:status_changed');
+      socket.off('game:status_changed', handleStatusUpdate);
+      socket.off('game:status', handleStatusUpdate);
     };
   }, []);
 
   async function reloadAll() {
     try {
       const [games, teamsData, sosData] = await Promise.all([
-        api.getGames(),
-        api.getAdminTeams(),
+        api.getGames().catch(() => []),
+        api.getAdminTeams().catch(() => []),
         api.getSosAlerts().catch(() => []),
       ]);
 
@@ -364,6 +368,56 @@ export default function AdminMap() {
                 </strong>
               </div>
             </div>
+
+            {game && (
+              <div className="bg-zinc-950/90 backdrop-blur-xl border border-zinc-800 px-2.5 py-1.5 rounded-2xl shadow-2xl flex items-center gap-2">
+                <span
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wide border ${
+                    game.status === 'running'
+                      ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                      : game.status === 'paused'
+                      ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                      : 'bg-zinc-800 text-zinc-400 border-zinc-700'
+                  }`}
+                >
+                  {game.status}
+                </span>
+
+                {game.status === 'running' && (
+                  <button
+                    onClick={async () => {
+                      try {
+                        const updated: any = await api.patchGameStatus(game.id, 'pause');
+                        setGame((g: any) => ({ ...(g || {}), ...(updated || {}) }));
+                      } catch (err: any) {
+                        alert(err.message ?? 'Pause failed');
+                      }
+                    }}
+                    className="px-2 py-0.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/40 text-amber-300 font-mono text-[10px] font-bold border border-amber-500/40 transition-all active:scale-95"
+                    title="Pause game timers"
+                  >
+                    ⏸ Pause
+                  </button>
+                )}
+
+                {game.status === 'paused' && (
+                  <button
+                    onClick={async () => {
+                      try {
+                        const updated: any = await api.patchGameStatus(game.id, 'resume');
+                        setGame((g: any) => ({ ...(g || {}), ...(updated || {}) }));
+                      } catch (err: any) {
+                        alert(err.message ?? 'Resume failed');
+                      }
+                    }}
+                    className="px-2 py-0.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-mono text-[10px] font-black transition-all active:scale-95"
+                    title="Resume game timers"
+                  >
+                    ▶ Resume
+                  </button>
+                )}
+              </div>
+            )}
 
             {sosCount > 0 && (
               <div className="bg-rose-950/90 border border-rose-500/50 px-3 py-2 rounded-2xl text-xs font-mono text-rose-300 font-bold shadow-2xl flex items-center gap-2 animate-bounce">

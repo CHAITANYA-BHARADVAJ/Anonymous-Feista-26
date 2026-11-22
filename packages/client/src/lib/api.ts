@@ -1,9 +1,24 @@
 const BASE = '/api/v1';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  let token: string | undefined;
+  try {
+    const raw = localStorage.getItem('ch-auth');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      token = parsed?.state?.token;
+    }
+  } catch {}
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(init?.headers as Record<string, string> ?? {}),
+  };
+
   const res = await fetch(`${BASE}${path}`, {
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+    headers,
     ...init,
   });
   if (!res.ok) {
@@ -34,7 +49,7 @@ export const api = {
       slotsRemaining: number;
     }>('/auth/registration/status'),
   adminLogin: (username: string, password: string) =>
-    request<{ role: string }>('/auth/admin/login', {
+    request<{ role: string; token?: string }>('/auth/admin/login', {
       method: 'POST',
       body: JSON.stringify({ username, password }),
     }),
@@ -85,8 +100,10 @@ export const api = {
     request<any>(`/admin/teams/${teamId}/force-complete`, { method: 'POST' }),
   getSosAlerts: () => request<any[]>('/admin/sos'),
   getGames: () => request<any[]>('/games'),
-  patchGameStatus: (id: number, action: string) =>
-    request(`/games/${id}/status`, { method: 'PATCH', body: JSON.stringify({ action }) }),
+  patchGameStatus: (id: number | undefined, action: string) => {
+    const url = id ? `/games/${id}/status` : '/games/status';
+    return request(url, { method: 'PATCH', body: JSON.stringify({ action }) });
+  },
   sendAnnouncement: (gameId: number, message: string, kind: string, targetTeamId?: number) =>
     request(`/games/${gameId}/announcements`, {
       method: 'POST',
