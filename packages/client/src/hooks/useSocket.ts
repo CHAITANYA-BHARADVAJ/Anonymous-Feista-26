@@ -47,6 +47,13 @@ export function useSocket() {
       }
     });
 
+    socket.on('clue:decrypted', async () => {
+      if (role === 'team') {
+        const data = await api.getParticipantGame();
+        setProgress(data.progress);
+      }
+    });
+
     socket.on('level:auto_unlocked', async () => {
       if (role === 'team') {
         const data = await api.getParticipantGame();
@@ -64,6 +71,7 @@ export function useSocket() {
       socket.off('game:status_changed');
       socket.off('game:announcement');
       socket.off('level:unlocked');
+      socket.off('clue:decrypted');
       socket.off('level:auto_unlocked');
       socket.off('leaderboard:updated');
     };

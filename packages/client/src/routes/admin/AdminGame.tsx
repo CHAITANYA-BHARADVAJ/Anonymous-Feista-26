@@ -36,6 +36,11 @@ export default function AdminGame() {
   const [penaltyMinutes, setPenaltyMinutes] = useState<number>(5);
   const [penaltyReason, setPenaltyReason] = useState('Rule violation');
 
+  // Emergency Level Override & Stage Jump state
+  const [jumpTeam, setJumpTeam] = useState<any | null>(null);
+  const [targetJumpStep, setTargetJumpStep] = useState<number>(1);
+  const [confirmTeamAction, setConfirmTeamAction] = useState<{ type: 'advance' | 'finish'; team: any } | null>(null);
+
   // Live Timer
   const [now, setNow] = useState(Date.now());
 
@@ -208,14 +213,6 @@ export default function AdminGame() {
   }
 
   async function handleVerifyFinish(teamId: number, teamName: string) {
-    if (
-      !confirm(
-        `Confirm podium finish verification for "${teamName}" at Start Venue?`,
-      )
-    ) {
-      return;
-    }
-
     setActionLoadingTeamId(teamId);
     try {
       await api.verifyTeamFinish(teamId);
@@ -225,32 +222,49 @@ export default function AdminGame() {
       alert(err.message ?? 'Verification failed');
     } finally {
       setActionLoadingTeamId(null);
+      setConfirmTeamAction(null);
     }
   }
 
-  async function handleForceUnlock(teamId: number, teamName: string) {
-    if (!confirm(`Emergency override: Force unlock next clue for "${teamName}"?`)) return;
+  async function handleBypassGps(teamId: number, teamName: string) {
     setActionLoadingTeamId(teamId);
     try {
-      await api.forceUnlockLevel(teamId);
+      const res = await api.bypassTeamGps(teamId);
+      addLog(`🔓 GPS bypassed for ${teamName}: ${res.levelTitle ?? 'Clue'} decrypted!`, 'success');
       await reload();
-      addLog(`Force unlocked next level for ${teamName}`, 'warn');
     } catch (err: any) {
-      alert(err.message ?? 'Could not unlock level');
+      console.error('Bypass GPS failed:', err);
+      alert(err.message ?? 'Could not bypass GPS check');
     } finally {
       setActionLoadingTeamId(null);
     }
   }
 
-  async function handleForceComplete(teamId: number, teamName: string) {
-    if (!confirm(`Force complete current level for "${teamName}" and advance?`)) return;
+  async function handleForceAdvance(teamId: number, teamName: string) {
     setActionLoadingTeamId(teamId);
     try {
-      await api.forceCompleteLevel(teamId);
+      const res = await api.forceAdvanceTeam(teamId);
+      addLog(`⏩ Force advanced ${teamName} to Stage ${res.nextStepNumber ?? 'Next'}`, 'warn');
       await reload();
-      addLog(`Force completed current level for ${teamName}`, 'warn');
     } catch (err: any) {
-      alert(err.message ?? 'Could not complete level');
+      console.error('Force advance failed:', err);
+      alert(err.message ?? 'Could not advance level');
+    } finally {
+      setActionLoadingTeamId(null);
+      setConfirmTeamAction(null);
+    }
+  }
+
+  async function handleExecuteJumpStage() {
+    if (!jumpTeam) return;
+    setActionLoadingTeamId(jumpTeam.id);
+    try {
+      await api.jumpTeamStage(jumpTeam.id, targetJumpStep);
+      addLog(`🔀 Emergency override: moved ${jumpTeam.name} directly to Stage ${targetJumpStep}`, 'warn');
+      setJumpTeam(null);
+      await reload();
+    } catch (err: any) {
+      alert(err.message ?? 'Failed to jump squad stage');
     } finally {
       setActionLoadingTeamId(null);
     }
@@ -802,21 +816,46 @@ export default function AdminGame() {
                   <div className="flex flex-wrap items-center gap-1.5">
                     {!isFinished ? (
                       <>
+                        {!reachedLocation && (
+                          <button
+                            onClick={() => handleBypassGps(team.id, team.name)}
+                            disabled={isLoadingThis}
+                            className="px-2.5 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 font-mono text-[11px] font-bold border border-emerald-500/40 transition-all active:scale-95 flex items-center gap-1 shadow-sm"
+                            title="Bypass GPS check & decrypt clue text on squad's phone immediately"
+                          >
+                            <span>🔓</span>
+                            <span>Bypass GPS</span>
+                          </button>
+                        )}
+
                         <button
-                          onClick={() => handleVerifyFinish(team.id, team.name)}
+                          onClick={() => setConfirmTeamAction({ type: 'advance', team })}
                           disabled={isLoadingThis}
-                          className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-all"
+                          className="px-2.5 py-1.5 rounded-lg bg-cyan-950/60 hover:bg-cyan-900/80 text-cyan-300 font-mono text-[11px] font-bold border border-cyan-500/40 transition-all active:scale-95 flex items-center gap-1"
+                          title="Force complete current level and advance squad to next clue"
                         >
-                          {isLoadingThis ? 'Verifying…' : 'Verify Finish'}
+                          <span>⏩</span>
+                          <span>Advance ➔</span>
                         </button>
 
                         <button
-                          onClick={() => handleForceUnlock(team.id, team.name)}
+                          onClick={() => {
+                            setJumpTeam(team);
+                            setTargetJumpStep(Math.min(10, currentLevelOrder + 1));
+                          }}
                           disabled={isLoadingThis}
-                          className="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-mono text-[11px] border border-zinc-700"
-                          title="Failsafe: Unlock next clue"
+                          className="px-2 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 font-mono text-[11px] border border-zinc-700 transition-all"
+                          title="Jump squad directly to any specific stage (1 to 10)"
                         >
-                          Unlock ➔
+                          🔀 Jump…
+                        </button>
+
+                        <button
+                          onClick={() => setConfirmTeamAction({ type: 'finish', team })}
+                          disabled={isLoadingThis}
+                          className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-all shadow-md"
+                        >
+                          {isLoadingThis ? 'Verifying…' : 'Verify Finish'}
                         </button>
 
                         <button
@@ -1022,6 +1061,139 @@ export default function AdminGame() {
                 }`}
               >
                 {confirmAction === 'end' ? 'Yes, Conclude Hunt' : 'Yes, Reset State'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* STAGE JUMP EMERGENCY OVERRIDE MODAL */}
+      {jumpTeam && (
+        <div className="fixed inset-0 z-[9999] bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-zinc-700 rounded-3xl p-6 max-w-md w-full shadow-2xl flex flex-col gap-4 text-zinc-100 animate-in fade-in zoom-in-95">
+            <div className="flex items-center gap-3">
+              <span className="w-10 h-10 rounded-2xl bg-cyan-950 border border-cyan-500/50 flex items-center justify-center text-xl shrink-0">
+                🔀
+              </span>
+              <div>
+                <h3 className="text-base font-bold text-white">
+                  Stage Override: {jumpTeam.name}
+                </h3>
+                <p className="text-xs text-zinc-400 mt-0.5 font-mono">
+                  Emergency Directive: Force move squad to target step
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <label className="text-[10px] font-mono uppercase text-zinc-400 font-bold">
+                Select Destination Stage (1 to 10):
+              </label>
+              <div className="grid grid-cols-5 gap-2 font-mono text-xs">
+                {Array.from({ length: 10 }, (_, i) => i + 1).map((step) => {
+                  const isSelected = targetJumpStep === step;
+                  const isFinale = step === 10;
+                  return (
+                    <button
+                      key={step}
+                      type="button"
+                      onClick={() => setTargetJumpStep(step)}
+                      className={`py-2.5 rounded-xl font-bold border transition-all text-center flex flex-col items-center justify-center ${
+                        isSelected
+                          ? isFinale
+                            ? 'bg-purple-600 border-purple-400 text-white shadow-lg shadow-purple-950'
+                            : 'bg-cyan-500 border-cyan-400 text-zinc-950 shadow-lg shadow-cyan-950'
+                          : 'bg-zinc-950 border-zinc-800 text-zinc-300 hover:border-zinc-600'
+                      }`}
+                    >
+                      <span>Stage {step}</span>
+                      {isFinale && <span className="text-[9px] uppercase tracking-wider">Finale 🏁</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <p className="text-[11px] font-mono text-zinc-400 bg-zinc-950 p-3 rounded-xl border border-zinc-800 leading-relaxed">
+              Moving {jumpTeam.name} to <strong>Stage {targetJumpStep}</strong> will mark prior objectives as cleared by admin override and instantly drop their Stage {targetJumpStep} landmark clue onto their device.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-800">
+              <button
+                type="button"
+                onClick={() => setJumpTeam(null)}
+                className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteJumpStage}
+                className="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-zinc-950 font-bold text-xs transition-all shadow-lg shadow-cyan-950"
+              >
+                Confirm Move to Stage {targetJumpStep} ➔
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRM TEAM ACTION MODAL (Advance / Finish) */}
+      {confirmTeamAction && (
+        <div className="fixed inset-0 z-[9999] bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-zinc-700 rounded-3xl p-6 max-w-md w-full shadow-2xl flex flex-col gap-4 text-zinc-100 animate-in fade-in zoom-in-95">
+            <div className="flex items-center gap-3">
+              <span className={`w-10 h-10 rounded-2xl flex items-center justify-center text-xl shrink-0 border ${
+                confirmTeamAction.type === 'finish'
+                  ? 'bg-emerald-950 border-emerald-500/50 text-emerald-300'
+                  : 'bg-cyan-950 border-cyan-500/50 text-cyan-300'
+              }`}>
+                {confirmTeamAction.type === 'finish' ? '🏆' : '⏩'}
+              </span>
+              <div>
+                <h3 className="text-base font-bold text-white">
+                  {confirmTeamAction.type === 'finish'
+                    ? `Verify Podium Finish: "${confirmTeamAction.team.name}"`
+                    : `Force Advance: "${confirmTeamAction.team.name}"`}
+                </h3>
+                <p className="text-xs text-zinc-400 mt-0.5 font-mono">
+                  {confirmTeamAction.type === 'finish'
+                    ? 'Start Venue Podium Sign-Off'
+                    : 'Emergency Field Directive'}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-zinc-300 leading-relaxed font-mono bg-zinc-950 p-3.5 rounded-xl border border-zinc-800">
+              {confirmTeamAction.type === 'finish'
+                ? `Confirm official finish verification for ${confirmTeamAction.team.name}. Their final stopwatch time will be locked and posted to the official leaderboard podium.`
+                : `Force complete current level for ${confirmTeamAction.team.name} and advance squad to the next stage along their route?`}
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-800">
+              <button
+                type="button"
+                onClick={() => setConfirmTeamAction(null)}
+                className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (confirmTeamAction.type === 'finish') {
+                    handleVerifyFinish(confirmTeamAction.team.id, confirmTeamAction.team.name);
+                  } else {
+                    handleForceAdvance(confirmTeamAction.team.id, confirmTeamAction.team.name);
+                  }
+                }}
+                className={`px-4 py-2 rounded-xl font-bold text-xs transition-all shadow-lg ${
+                  confirmTeamAction.type === 'finish'
+                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-950'
+                    : 'bg-cyan-600 hover:bg-cyan-500 text-white shadow-cyan-950'
+                }`}
+              >
+                {confirmTeamAction.type === 'finish' ? 'Yes, Verify Finish' : 'Yes, Force Advance'}
               </button>
             </div>
           </div>

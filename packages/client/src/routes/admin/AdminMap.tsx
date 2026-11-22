@@ -663,6 +663,43 @@ export default function AdminMap() {
                         <span>Radio Nudge</span>
                       </button>
                     </div>
+
+                    {!team.isFinished && (
+                      <div className="flex items-center gap-1.5 pt-1 border-t border-zinc-800/80">
+                        <button
+                          onClick={async () => {
+                            try {
+                              const res = await api.bypassTeamGps(team.id);
+                              alert(`GPS Bypassed! Clue "${res.levelTitle ?? 'Clue'}" decrypted for ${team.name}.`);
+                              reloadTeams();
+                            } catch (err: any) {
+                              alert(err.message ?? 'Failed to bypass GPS');
+                            }
+                          }}
+                          className="flex-1 py-1 px-1.5 rounded-lg bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-500/40 text-emerald-300 text-[10px] font-bold transition-all flex items-center justify-center gap-1"
+                          title="Bypass GPS check & decrypt clue text on squad's phone"
+                        >
+                          <span>🔓</span>
+                          <span>Bypass GPS</span>
+                        </button>
+                        <button
+                          onClick={async () => {
+                            try {
+                              const res = await api.forceAdvanceTeam(team.id);
+                              alert(`Force advanced ${team.name} to Stage ${res.nextStepNumber ?? 'Next'}!`);
+                              reloadTeams();
+                            } catch (err: any) {
+                              alert(err.message ?? 'Failed to advance stage');
+                            }
+                          }}
+                          className="flex-1 py-1 px-1.5 rounded-lg bg-cyan-950/60 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300 text-[10px] font-bold transition-all flex items-center justify-center gap-1"
+                          title="Force complete current level and advance squad to next clue"
+                        >
+                          <span>⏩</span>
+                          <span>Advance ➔</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </Popup>
               </Marker>
@@ -799,6 +836,51 @@ export default function AdminMap() {
                         {hasLocation ? '● GPS Online' : '○ No Signal'}
                       </span>
                     </div>
+
+                    {isSelected && !team.isFinished && (
+                      <div
+                        className="mt-2 pt-2 border-t border-zinc-800 flex items-center gap-1.5"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          onClick={async () => {
+                            try {
+                              const res = await api.bypassTeamGps(team.id);
+                              alert(`GPS Bypassed! Clue "${res.levelTitle ?? 'Clue'}" decrypted for ${team.name}.`);
+                              reloadTeams();
+                            } catch (err: any) {
+                              alert(err.message ?? 'Failed to bypass GPS');
+                            }
+                          }}
+                          className="flex-1 py-1 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold transition-all active:scale-95"
+                          title="Bypass GPS and decrypt clue text on squad's phone"
+                        >
+                          🔓 Bypass GPS
+                        </button>
+                        <button
+                          onClick={async () => {
+                            try {
+                              const res = await api.forceAdvanceTeam(team.id);
+                              alert(`Force advanced ${team.name} to Stage ${res.nextStepNumber ?? 'Next'}!`);
+                              reloadTeams();
+                            } catch (err: any) {
+                              alert(err.message ?? 'Failed to advance stage');
+                            }
+                          }}
+                          className="flex-1 py-1 rounded bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 text-[10px] font-bold transition-all active:scale-95"
+                          title="Force complete current level and advance squad to next clue"
+                        >
+                          ⏩ Advance ➔
+                        </button>
+                        <button
+                          onClick={() => setNudgeTeam(team)}
+                          className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[10px] border border-zinc-700"
+                          title="Send Radio Nudge"
+                        >
+                          📡
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })

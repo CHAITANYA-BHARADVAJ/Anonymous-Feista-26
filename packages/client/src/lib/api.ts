@@ -94,6 +94,12 @@ export const api = {
     request<any>(`/admin/teams/${teamId}/reset`, { method: 'POST' }),
   verifyTeamFinish: (teamId: number) =>
     request<any>(`/admin/teams/${teamId}/verify-finish`, { method: 'POST' }),
+  bypassTeamGps: (teamId: number) =>
+    request<any>(`/admin/teams/${teamId}/bypass-gps`, { method: 'POST' }),
+  forceAdvanceTeam: (teamId: number) =>
+    request<any>(`/admin/teams/${teamId}/force-advance`, { method: 'POST' }),
+  jumpTeamStage: (teamId: number, targetStepNumber: number) =>
+    request<any>(`/admin/teams/${teamId}/jump-stage`, { method: 'POST', body: JSON.stringify({ targetStepNumber }) }),
   forceUnlockLevel: (teamId: number) =>
     request<any>(`/admin/teams/${teamId}/force-unlock`, { method: 'POST' }),
   forceCompleteLevel: (teamId: number) =>
