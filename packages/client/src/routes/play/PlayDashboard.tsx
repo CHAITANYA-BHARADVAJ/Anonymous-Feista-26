@@ -129,6 +129,17 @@ export default function PlayDashboard() {
     [currentLevel?.hintReveals],
   );
 
+  // Auto-expand sheet and reset input whenever active level progresses or kickoff happens
+  const prevLevelIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (currentLevel?.levelId && currentLevel.levelId !== prevLevelIdRef.current) {
+      prevLevelIdRef.current = currentLevel.levelId;
+      setIsSheetExpanded(true);
+      setAnswer('');
+      setAnswerError('');
+    }
+  }, [currentLevel?.levelId]);
+
   // Fullscreen tracking & auto-engage
   useEffect(() => {
     const cleanup = enableAutoFullscreenOnFirstGesture();

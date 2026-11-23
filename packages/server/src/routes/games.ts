@@ -134,6 +134,11 @@ async function handleStatusChange(
   io.to(`game:${gameId}`).emit('game:status_changed', statusPayload);
   io.to(`game:${gameId}`).emit('game:status', statusPayload);
 
+  if (action === 'start') {
+    io.emit('game:started', statusPayload);
+    io.to(`game:${gameId}`).emit('game:started', statusPayload);
+  }
+
   try {
     const rankings = await buildLeaderboard();
     io.emit('leaderboard:updated', { rankings });
