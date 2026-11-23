@@ -7,16 +7,16 @@ FROM node:20-bookworm-slim AS builder
 
 WORKDIR /app
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y openssl python3 make g++ && rm -rf /var/lib/apt/lists/*
+# Install build dependencies (openssl only; pure JS monorepo needs no python/g++)
+RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
 # Copy package manifests
 COPY package*.json ./
 COPY packages/client/package*.json ./packages/client/
 COPY packages/server/package*.json ./packages/server/
 
-# Install all dependencies across monorepo
-RUN npm ci
+# Install dependencies and clean cache to preserve disk space
+RUN npm ci && npm cache clean --force
 
 # Copy Prisma schema and generate client
 COPY packages/server/prisma ./packages/server/prisma
@@ -27,6 +27,9 @@ COPY . .
 
 # Build Client (Vite) and Server (TypeScript)
 RUN npm run build
+
+# Prune devDependencies to reduce final container footprint
+RUN npm prune --production && npm cache clean --force
 
 # Stage 2: Production Runtime
 FROM node:20-bookworm-slim AS runner
