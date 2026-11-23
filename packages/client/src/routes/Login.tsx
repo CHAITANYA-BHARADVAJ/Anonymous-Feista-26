@@ -9,8 +9,21 @@ export default function Login() {
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const role = useAuthStore((s) => s.role);
+  const hasHydrated = useAuthStore((s) => s.hasHydrated);
   const setTeam = useAuthStore((s) => s.setTeam);
   const navigate = useNavigate();
+
+  // If already authenticated, redirect straight to operative console
+  useEffect(() => {
+    if (hasHydrated) {
+      if (role === 'team') {
+        navigate('/play', { replace: true });
+      } else if (role === 'admin') {
+        navigate('/admin/game', { replace: true });
+      }
+    }
+  }, [role, hasHydrated, navigate]);
 
   useEffect(() => {
     const cleanup = enableAutoFullscreenOnFirstGesture();

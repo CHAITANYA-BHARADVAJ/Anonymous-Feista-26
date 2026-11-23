@@ -51,7 +51,7 @@ export const api = {
       body: JSON.stringify({ name, code }),
     }),
   registerTeam: (name: string, leaderName: string, mobile: string, code: string) =>
-    request<{ teamId: number; teamName: string; leaderName?: string; mobile?: string }>('/auth/team/register', {
+    request<{ teamId: number; teamName: string; leaderName?: string; mobile?: string; token?: string }>('/auth/team/register', {
       method: 'POST',
       body: JSON.stringify({ name, leaderName, mobile, code }),
     }),

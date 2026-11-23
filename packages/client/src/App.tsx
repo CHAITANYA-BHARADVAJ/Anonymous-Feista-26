@@ -20,6 +20,17 @@ const AdminLeaderboard = lazy(() => import('./routes/admin/AdminLeaderboard'));
 
 function RequireAuth({ role, children }: { role: 'team' | 'admin'; children: JSX.Element }) {
   const authRole = useAuthStore((s) => s.role);
+  const hasHydrated = useAuthStore((s) => s.hasHydrated);
+
+  // If Zustand persist is still rehydrating on cold reload, do not kick user to login
+  if (!hasHydrated) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-[#07080b] text-cyan-400 font-mono text-xs">
+        CONNECTING OPERATIVE SESSION…
+      </div>
+    );
+  }
+
   if (authRole !== role) return <Navigate to={role === 'admin' ? '/admin/login' : '/login'} replace />;
   return children;
 }
@@ -43,6 +54,18 @@ function AppInner() {
   return (
     <Suspense fallback={<div className="flex items-center justify-center h-full text-white">Loading…</div>}>
       <Routes>
+        <Route
+          path="/"
+          element={
+            role === 'team' ? (
+              <Navigate to="/play" replace />
+            ) : role === 'admin' ? (
+              <Navigate to="/admin/game" replace />
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          }
+        />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/admin/login" element={<AdminLogin />} />
@@ -65,7 +88,18 @@ function AppInner() {
           <Route path="leaderboard" element={<AdminLeaderboard />} />
         </Route>
 
-        <Route path="*" element={<Navigate to="/login" replace />} />
+        <Route
+          path="*"
+          element={
+            role === 'team' ? (
+              <Navigate to="/play" replace />
+            ) : role === 'admin' ? (
+              <Navigate to="/admin/game" replace />
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          }
+        />
       </Routes>
     </Suspense>
   );

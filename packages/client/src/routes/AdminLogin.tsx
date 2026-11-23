@@ -9,8 +9,21 @@ export default function AdminLogin() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const role = useAuthStore((s) => s.role);
+  const hasHydrated = useAuthStore((s) => s.hasHydrated);
   const setAdmin = useAuthStore((s) => s.setAdmin);
   const navigate = useNavigate();
+
+  // If already authenticated, redirect straight to command desk
+  useEffect(() => {
+    if (hasHydrated) {
+      if (role === 'admin') {
+        navigate('/admin/game', { replace: true });
+      } else if (role === 'team') {
+        navigate('/play', { replace: true });
+      }
+    }
+  }, [role, hasHydrated, navigate]);
 
   useEffect(() => {
     const cleanup = enableAutoFullscreenOnFirstGesture();

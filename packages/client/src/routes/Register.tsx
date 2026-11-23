@@ -57,7 +57,7 @@ export default function Register() {
         code.trim(),
       );
 
-      setTeam(data.teamId, data.teamName, '');
+      setTeam(data.teamId, data.teamName, data.token || '');
       navigate('/play');
     } catch (err: any) {
       setError(err.message ?? 'Registration failed. Please check your inputs.');
