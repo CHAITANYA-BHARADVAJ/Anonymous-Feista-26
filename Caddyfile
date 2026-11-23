@@ -2,6 +2,13 @@
     # Global Caddy options
     email {$ACME_EMAIL:admin@anonymoussdmcet.in}
     admin off
+
+    # Force HTTP/1.1 and HTTP/2 over TCP only.
+    # Disables HTTP/3 (QUIC / UDP port 443) which is blocked by default on AWS EC2 Security Groups
+    # and causes browser handshakes to hang and requests to time out.
+    servers {
+        protocols h1 h2
+    }
 }
 
 # Dynamic domain from environment (e.g. 13.233.50.120.nip.io or hunt.yourdomain.com)

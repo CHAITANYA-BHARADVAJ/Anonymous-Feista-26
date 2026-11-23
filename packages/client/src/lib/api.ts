@@ -1,6 +1,6 @@
 const BASE = '/api/v1';
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, retries = 1): Promise<T> {
   let token: string | undefined;
   try {
     const raw = localStorage.getItem('ch-auth');
@@ -16,16 +16,31 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...(init?.headers as Record<string, string> ?? {}),
   };
 
-  const res = await fetch(`${BASE}${path}`, {
-    credentials: 'include',
-    headers,
-    ...init,
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? `HTTP ${res.status}`);
+  try {
+    const res = await fetch(`${BASE}${path}`, {
+      credentials: 'include',
+      headers,
+      ...init,
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error ?? `HTTP ${res.status}`);
+    }
+    return res.json() as Promise<T>;
+  } catch (err: any) {
+    // If it's a transient network failure (e.g. cellular glitch or temporary socket drop) and retries remain, retry once
+    if (
+      retries > 0 &&
+      (err.name === 'TypeError' ||
+        err.message?.includes('Failed to fetch') ||
+        err.message?.includes('NetworkError') ||
+        err.message?.includes('Load failed'))
+    ) {
+      await new Promise((r) => setTimeout(r, 350));
+      return request<T>(path, init, retries - 1);
+    }
+    throw err;
   }
-  return res.json() as Promise<T>;
 }
 
 export const api = {

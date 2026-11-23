@@ -79,5 +79,13 @@ const PORT = Number(process.env.PORT ?? 3001);
 
 server.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
+  try {
+    await prisma.$queryRawUnsafe('PRAGMA journal_mode = WAL;');
+    await prisma.$queryRawUnsafe('PRAGMA busy_timeout = 5000;');
+    await prisma.$queryRawUnsafe('PRAGMA synchronous = NORMAL;');
+    console.log('⚡ SQLite WAL mode and 5000ms busy_timeout activated');
+  } catch (e) {
+    console.warn('⚠️ Could not configure SQLite WAL pragma:', e);
+  }
   await rescheduleTimers(io);
 });
