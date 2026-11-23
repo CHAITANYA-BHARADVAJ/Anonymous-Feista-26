@@ -28,9 +28,6 @@ COPY . .
 # Build Client (Vite) and Server (TypeScript)
 RUN npm run build
 
-# Prune devDependencies to reduce final container footprint
-RUN npm prune --production && npm cache clean --force
-
 # Stage 2: Production Runtime
 FROM node:20-bookworm-slim AS runner
 
