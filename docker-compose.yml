@@ -21,6 +21,10 @@ services:
       - ./uploads:/app/packages/server/uploads
     expose:
       - "3001"
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
     networks:
       - hunt-net
 
@@ -31,6 +35,10 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
     environment:
       - DOMAIN=${DOMAIN:-localhost}
       - ACME_EMAIL=${ACME_EMAIL:-admin@anonymoussdmcet.in}

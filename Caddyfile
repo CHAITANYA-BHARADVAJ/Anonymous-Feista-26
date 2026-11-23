@@ -16,6 +16,14 @@
     # High-performance compression for map tiles, vectors, and JS bundles
     encode gzip zstd
 
+    # Aggressive browser caching for Vite hashed production assets
+    @static {
+        path /assets/*
+    }
+    header @static {
+        Cache-Control "public, max-age=31536000, immutable"
+    }
+
     # Health check passthrough
     handle /api/v1/health {
         reverse_proxy app:3001

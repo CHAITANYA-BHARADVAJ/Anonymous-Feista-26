@@ -4,7 +4,7 @@ import { requireAuth, AuthRequest } from '../middleware/auth';
 import { photoUpload } from '../middleware/upload';
 import { io } from '../index';
 import { scheduleTeamLevelTimer } from '../services/timerService';
-import { buildLeaderboard } from '../services/scoreService';
+import { buildLeaderboard, invalidateLeaderboardCache } from '../services/scoreService';
 import { dispatchNextConflictFreeClue } from '../services/dispatchService';
 
 const router = Router();
@@ -155,7 +155,8 @@ router.post('/levels/:id/answer', requireAuth('team'), async (req: AuthRequest, 
   const dispatch = await dispatchNextConflictFreeClue(io, teamId, level.gameId);
 
   // Update leaderboard
-  const rankings = await buildLeaderboard();
+  invalidateLeaderboardCache();
+  const rankings = await buildLeaderboard(true);
   if (game) io.to(`game:${game.id}`).emit('leaderboard:updated', { rankings });
 
   res.json({
@@ -217,6 +218,7 @@ router.post('/levels/:id/hints/:hintOrder/reveal', requireAuth('team'), async (r
   ]);
 
   res.json({ text: hint.text, penaltyMins: useFreeHint ? 0 : hint.penaltyMins });
+  invalidateLeaderboardCache();
 });
 
 // Claim checkpoint
@@ -244,7 +246,8 @@ router.post('/checkpoints/:id/claim', requireAuth('team'), async (req: AuthReque
   await prisma.teamCheckpoint.create({ data: { teamId, checkpointId, claimedAt: new Date() } });
 
   const game = await prisma.game.findFirst({ orderBy: { id: 'desc' } });
-  const rankings = await buildLeaderboard();
+  invalidateLeaderboardCache();
+  const rankings = await buildLeaderboard(true);
   if (game) io.to(`game:${game.id}`).emit('leaderboard:updated', { rankings });
 
   res.json({ rewardKind: cp.rewardKind, rewardValue: cp.rewardValue });

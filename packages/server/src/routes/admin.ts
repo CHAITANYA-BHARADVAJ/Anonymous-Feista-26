@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
 import { requireAuth } from '../middleware/auth';
 import { io } from '../index';
-import { buildLeaderboard } from '../services/scoreService';
+import { buildLeaderboard, invalidateLeaderboardCache } from '../services/scoreService';
 
 const router = Router();
 
@@ -148,7 +148,8 @@ router.delete('/teams/:id', requireAuth('admin'), async (req, res) => {
   await prisma.team.delete({ where: { id: teamId } });
 
   const game = await prisma.game.findFirst({ orderBy: { id: 'desc' } });
-  const rankings = await buildLeaderboard();
+  invalidateLeaderboardCache();
+  const rankings = await buildLeaderboard(true);
   if (game) {
     io.to(`game:${game.id}`).emit('leaderboard:updated', { rankings });
   }
@@ -563,7 +564,8 @@ router.post('/teams/:id/penalty', requireAuth('admin'), async (req, res) => {
   });
 
   const game = await prisma.game.findFirst({ orderBy: { id: 'desc' } });
-  const rankings = await buildLeaderboard();
+  invalidateLeaderboardCache();
+  const rankings = await buildLeaderboard(true);
   if (game) {
     io.to(`game:${game.id}`).emit('leaderboard:updated', { rankings });
     io.to(`team:${teamId}`).emit('team:penalty_applied', {

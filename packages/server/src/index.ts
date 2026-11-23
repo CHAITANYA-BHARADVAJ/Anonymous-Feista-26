@@ -29,6 +29,9 @@ export const io = new Server(server, {
     origin: CLIENT_URL ? [CLIENT_URL, 'http://localhost:5173'] : true,
     credentials: true,
   },
+  pingInterval: 10000,
+  pingTimeout: 5000,
+  transports: ['websocket', 'polling'],
 });
 
 app.use(

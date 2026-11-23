@@ -29,7 +29,20 @@ export interface TeamRanking {
   finished: boolean;
 }
 
-export async function buildLeaderboard(): Promise<TeamRanking[]> {
+// In-memory 2-second cache to prevent SQLite thrashing during high concurrency
+let cachedLeaderboard: { timestamp: number; data: TeamRanking[] } | null = null;
+const CACHE_TTL_MS = 2000;
+
+export function invalidateLeaderboardCache() {
+  cachedLeaderboard = null;
+}
+
+export async function buildLeaderboard(forceRefresh = false): Promise<TeamRanking[]> {
+  const now = Date.now();
+  if (!forceRefresh && cachedLeaderboard && now - cachedLeaderboard.timestamp < CACHE_TTL_MS) {
+    return cachedLeaderboard.data;
+  }
+
   const game = await prisma.game.findFirst({ orderBy: { id: 'desc' } });
   const teams = await prisma.team.findMany({
     include: {
@@ -73,5 +86,6 @@ export async function buildLeaderboard(): Promise<TeamRanking[]> {
   });
 
   rows.forEach((r, i) => (r.rank = i + 1));
+  cachedLeaderboard = { timestamp: now, data: rows };
   return rows;
 }
