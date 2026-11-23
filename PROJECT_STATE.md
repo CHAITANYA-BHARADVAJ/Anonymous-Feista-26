@@ -1,9 +1,9 @@
 # 🎯 PROJECT_STATE — Campus Hunt SDMCET (Anonymous-Feista-26)
 
 > **Auto-Maintained Operational Master File**  
-> **Last Updated:** November 23, 2026, 23:58 IST  
+> **Last Updated:** November 24, 2026, 00:55 IST  
 > **Active Branch:** `feat/initial-implementation` & `main`  
-> **Latest Commit:** [`c4167cc`](https://github.com/CHAITANYA-BHARADVAJ/Anonymous-Feista-26/commit/c4167cc)  
+> **Latest Commit:** [`1bc0dfe`](https://github.com/CHAITANYA-BHARADVAJ/Anonymous-Feista-26/commit/1bc0dfe) (Committed locally on feat/initial-implementation, awaiting push permission)  
 > **Live Production URL:** [https://13.126.101.127.nip.io/](https://13.126.101.127.nip.io/)  
 > **Public IP:** `13.126.101.127`  
 > **Repository:** [https://github.com/CHAITANYA-BHARADVAJ/Anonymous-Feista-26](https://github.com/CHAITANYA-BHARADVAJ/Anonymous-Feista-26)  
@@ -195,6 +195,13 @@ Via: 1.1 Caddy
 
 ## 📜 8. Chronological Update & Changelog History
 
+* **Nov 24, 2026:** Comprehensive release delivering 6 user-requested operational updates:
+  1. **Broadcast Transmission Fix:** Repositioned `<AnnouncementBanner />` as an elevated fixed overlay (`z-[1300]`) with cyber-card design, audio ping, and 15s auto-dismiss; expanded Socket.io emission to global and room channels.
+  2. **Clue Pool Studio (Master Library):** Added dedicated 'Clue Pool Studio' tab in AdminLevels backed by a 26-landmark SDMCET master bank (`cluePoolDefaults.ts`), search/filter, multi-select checkboxes, custom clue editor, and 1-click `deploy-pool` transactional backend endpoint.
+  3. **Participant GPS Recalibration:** Built `<GpsCalibrationModal />` featuring live accuracy meter (±meters), colored status bar, satellite fix readouts, compass figure-8 sensor reset guide, and "Force Recalibrate" button directly in the Top HUD.
+  4. **Inline Social Media QR Generator:** Built zero-latency offline SVG QR generator (`QrCodeDisplay.tsx` via `@zxing/library`) with tap-to-enlarge modal so teammates can instantly scan social media links (Instagram, YouTube, Drive) on a secondary phone.
+  5. **Camera Punch-Hole Safe HUD:** Relocated the top-center mission stopwatch to the Top-Right cluster, leaving the center safe zone completely clear of selfie camera notches/holes.
+  6. **Synthesized Web Audio & Haptic Feedback:** Engineered zero-asset synthesized sound library (`sound.ts`) and vibration patterns triggered on answer submission, check-in, announcements, and geofence perimeter violations.
 * **Nov 23, 2026 (Commit `c4167cc`):** Preserved Prisma and TSX CLI in production container to ensure instant offline container boot without npm registry dependency.
 * **Nov 23, 2026 (Commit `618ec6a`):** Dockerfile disk footprint optimization: stripped unnecessary `g++`/`python3`/`make` packages and added npm cache cleanup to prevent `ENOSPC` errors on 8GB AWS instances.
 * **Nov 23, 2026 (Commit `dd24f3e`):** Instant real-time kickoff reflection: participant screens immediately receive starting clues with vibration and sound chime when admin clicks **START GAME**.

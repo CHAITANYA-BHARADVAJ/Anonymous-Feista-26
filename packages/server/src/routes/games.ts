@@ -174,6 +174,7 @@ router.post('/:id/announcements', requireAuth('admin'), async (req, res) => {
   });
 
   if (kind === 'broadcast') {
+    io.emit('game:announcement', { kind, message, sentAt: ann.sentAt });
     io.to(`game:${gameId}`).emit('game:announcement', { kind, message, sentAt: ann.sentAt });
   } else if (targetTeamId) {
     io.to(`team:${targetTeamId}`).emit('game:announcement', { kind, message, sentAt: ann.sentAt });

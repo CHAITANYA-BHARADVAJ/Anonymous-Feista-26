@@ -83,6 +83,94 @@ router.post('/game/:gameId/generate-25-pack', requireAuth('admin'), async (req, 
   }
 });
 
+// Deploy selected clues from Clue Pool Studio directly into active game
+router.post('/game/:gameId/deploy-pool', requireAuth('admin'), async (req, res) => {
+  const gameId = Number(req.params.gameId);
+  const { poolClues } = req.body as { poolClues: any[] };
+
+  if (!Array.isArray(poolClues) || poolClues.length === 0) {
+    res.status(400).json({ error: 'Please select at least 1 clue from the pool to deploy.' });
+    return;
+  }
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      // Clear previous progress, relations, and paths for this game
+      await tx.teamPath.deleteMany({});
+      await tx.hintReveal.deleteMany({});
+      await tx.teamLevelProgress.deleteMany({});
+      await tx.teamCheckpoint.deleteMany({});
+      await tx.hint.deleteMany({});
+      await tx.checkpoint.deleteMany({});
+      await tx.socialLink.deleteMany({});
+      await tx.level.deleteMany({ where: { gameId } });
+
+      for (let i = 0; i < poolClues.length; i++) {
+        const item = poolClues[i];
+        const isFinal = Boolean(item.isFinal || (i === poolClues.length - 1 && item.title?.toLowerCase().includes('finale')));
+        const created = await tx.level.create({
+          data: {
+            gameId,
+            orderIndex: i + 1,
+            title: item.title,
+            clueText: item.clueText || '',
+            locationHint: item.locationHint || '',
+            answer: item.answer || '',
+            isFinal,
+            targetLat: item.targetLat != null && item.targetLat !== '' ? Number(item.targetLat) : null,
+            targetLng: item.targetLng != null && item.targetLng !== '' ? Number(item.targetLng) : null,
+            triggerRadiusMeters: item.triggerRadiusMeters != null && item.triggerRadiusMeters !== '' ? Number(item.triggerRadiusMeters) : 25,
+            durationSecs: item.durationSecs != null && item.durationSecs !== '' ? Number(item.durationSecs) : null,
+          },
+        });
+
+        // Hints
+        if (Array.isArray(item.hints)) {
+          for (let hIdx = 0; hIdx < item.hints.length; hIdx++) {
+            const h = item.hints[hIdx];
+            if (h && h.text && h.text.trim()) {
+              await tx.hint.create({
+                data: {
+                  levelId: created.id,
+                  orderIndex: hIdx + 1,
+                  text: h.text.trim(),
+                  penaltyMins: Number(h.penaltyMins ?? (hIdx + 1) * 2),
+                },
+              });
+            }
+          }
+        }
+
+        // Social Links
+        if (Array.isArray(item.socialLinks)) {
+          for (const sl of item.socialLinks) {
+            if (sl && sl.url && sl.url.trim()) {
+              await tx.socialLink.create({
+                data: {
+                  levelId: created.id,
+                  platform: sl.platform || 'Dossier',
+                  url: sl.url.trim(),
+                },
+              });
+            }
+          }
+        }
+      }
+    });
+
+    const deployed = await prisma.level.findMany({
+      where: { gameId },
+      orderBy: { orderIndex: 'asc' },
+      include: { hints: true, socialLinks: true },
+    });
+
+    res.json({ ok: true, count: deployed.length, levels: deployed });
+  } catch (err: any) {
+    console.error('Failed to deploy pool clues:', err);
+    res.status(500).json({ error: err.message ?? 'Failed to deploy pool clues' });
+  }
+});
+
 // List levels for a game
 router.get('/game/:gameId', requireAuth('admin'), async (req, res) => {
   const levels = await prisma.level.findMany({
@@ -116,6 +204,20 @@ router.post('/game/:gameId', requireAuth('admin'), async (req, res) => {
             orderIndex: i + 1,
             text: h.text.trim(),
             penaltyMins: Number(h.penaltyMins ?? (i + 1) * 2),
+          },
+        });
+      }
+    }
+  }
+
+  if (Array.isArray(socialLinks)) {
+    for (const sl of socialLinks) {
+      if (sl && sl.url && sl.url.trim()) {
+        await prisma.socialLink.create({
+          data: {
+            levelId: level.id,
+            platform: sl.platform || 'Dossier',
+            url: sl.url.trim(),
           },
         });
       }
@@ -162,6 +264,21 @@ router.put('/:id', requireAuth('admin'), async (req, res) => {
             orderIndex: i + 1,
             text: h.text.trim(),
             penaltyMins: Number(h.penaltyMins ?? (i + 1) * 2),
+          },
+        });
+      }
+    }
+  }
+
+  if (Array.isArray(socialLinks)) {
+    await prisma.socialLink.deleteMany({ where: { levelId: id } });
+    for (const sl of socialLinks) {
+      if (sl && sl.url && sl.url.trim()) {
+        await prisma.socialLink.create({
+          data: {
+            levelId: id,
+            platform: sl.platform || 'Dossier',
+            url: sl.url.trim(),
           },
         });
       }

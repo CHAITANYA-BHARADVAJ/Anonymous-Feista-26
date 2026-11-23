@@ -11,7 +11,9 @@ import { useCountdown, useStopwatch, formatMs } from '../../hooks/useCountdown';
 import { api } from '../../lib/api';
 import { disconnectSocket } from '../../lib/socket';
 import { computeDistanceMeters, computeBearingDegrees } from '../../lib/geo';
-import { playClueUnlockedSound, triggerHaptic } from '../../lib/sound';
+import { playClueUnlockedSound, playSuccessSound, playErrorSound, triggerHaptic } from '../../lib/sound';
+import QrCodeDisplay from '../../components/QrCodeDisplay';
+import GpsCalibrationModal from '../../components/GpsCalibrationModal';
 import {
   requestFullscreen,
   isFullscreen,
@@ -99,6 +101,7 @@ export default function PlayDashboard() {
   const [isSheetExpanded, setIsSheetExpanded] = useState<boolean>(true);
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
   const [showClueModal, setShowClueModal] = useState<boolean>(false);
+  const [showGpsModal, setShowGpsModal] = useState<boolean>(false);
 
   // Mission Action States
   const [answer, setAnswer] = useState('');
@@ -238,12 +241,18 @@ export default function PlayDashboard() {
       const res = await api.submitAnswer(level.id, answer.trim());
       if (res.correct) {
         setAnswer('');
+        playSuccessSound();
+        triggerHaptic([80, 50, 120]);
         const data = await api.getParticipantGame();
         setProgress(data.progress);
+        if (res.finished) {
+          triggerHaptic([200, 100, 200, 100, 500]);
+        }
       }
     } catch (err: any) {
       setAnswerError(err.message ?? 'Verification rejected: incorrect solution');
-      if ('vibrate' in navigator) navigator.vibrate(200);
+      playErrorSound();
+      triggerHaptic([250, 100, 250]);
     } finally {
       setAnswerLoading(false);
     }
@@ -317,7 +326,7 @@ export default function PlayDashboard() {
         {/* Left: Squad Profile & Call-Sign Pill */}
         <button
           onClick={() => setShowProfileModal(true)}
-          className="pointer-events-auto bg-zinc-950/85 backdrop-blur-xl border border-zinc-800 hover:border-zinc-700 px-3 py-1.5 rounded-2xl shadow-2xl flex items-center gap-2 active:scale-95 transition-all"
+          className="pointer-events-auto bg-zinc-950/85 backdrop-blur-xl border border-zinc-800 hover:border-zinc-700 px-3 py-1.5 rounded-2xl shadow-2xl flex items-center gap-2 active:scale-95 transition-all shrink-0"
           title="Squad Operative Dossier"
         >
           <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
@@ -325,37 +334,49 @@ export default function PlayDashboard() {
             <span className="text-[10px] font-mono uppercase tracking-widest text-zinc-400 font-bold leading-tight">
               SQUAD #{teamId ?? '01'}
             </span>
-            <span className="text-xs font-mono font-black text-white tracking-tight truncate max-w-[120px]">
+            <span className="text-xs font-mono font-black text-white tracking-tight truncate max-w-[110px]">
               {teamName || 'OPERATIVE'}
             </span>
           </div>
         </button>
 
-        {/* Center: Mission Stopwatch (Counts UP from 00:00:00) */}
-        {game?.startedAt && (
-          <div className="pointer-events-auto bg-zinc-950/85 backdrop-blur-xl border border-zinc-800 px-3 py-1.5 rounded-2xl shadow-2xl flex items-center gap-2">
-            <div className="flex items-center gap-1.5">
-              <span className={`w-1.5 h-1.5 rounded-full ${game.status === 'paused' ? 'bg-amber-400' : 'bg-emerald-400 animate-pulse'}`} />
-              <span className="text-[9px] font-mono text-zinc-400 uppercase tracking-wider font-bold">
-                {game.status === 'paused' ? 'PAUSED' : 'TIME'}
-              </span>
-              <span className="text-xs font-mono font-black tabular-nums tracking-tight text-white">
-                {elapsedFormatted}
-              </span>
-            </div>
-            {totalHintPenaltiesMins > 0 && (
-              <span
-                className="text-[9px] font-mono bg-amber-500/15 border border-amber-500/30 text-amber-300 px-1.5 py-0.5 rounded-md font-bold"
-                title="Hint Penalty Time added to finish score"
-              >
-                +{totalHintPenaltiesMins}m
-              </span>
-            )}
-          </div>
-        )}
+        {/* Center: EMPTY safe zone to avoid phone selfie camera punch-holes and notches */}
+        <div className="flex-1" />
 
-        {/* Right: Tactical Tools (Sat Switcher, GPS Center, Fullscreen) */}
-        <div className="pointer-events-auto flex items-center gap-1.5">
+        {/* Right: Tactical Tools + Mission Stopwatch (relocated to avoid camera overlap) */}
+        <div className="pointer-events-auto flex items-center gap-1.5 shrink-0">
+          {/* Mission Stopwatch (Counts UP from 00:00:00) */}
+          {game?.startedAt && (
+            <div className="bg-zinc-950/85 backdrop-blur-xl border border-zinc-800 px-2.5 py-1.5 rounded-2xl shadow-2xl flex items-center gap-1.5">
+              <div className="flex items-center gap-1">
+                <span className={`w-1.5 h-1.5 rounded-full ${game.status === 'paused' ? 'bg-amber-400' : 'bg-emerald-400 animate-pulse'}`} />
+                <span className="text-[9px] font-mono text-zinc-400 uppercase tracking-wider font-bold">
+                  {game.status === 'paused' ? 'PAUSED' : 'TIME'}
+                </span>
+                <span className="text-xs font-mono font-black tabular-nums tracking-tight text-white">
+                  {elapsedFormatted}
+                </span>
+              </div>
+              {totalHintPenaltiesMins > 0 && (
+                <span
+                  className="text-[9px] font-mono bg-amber-500/15 border border-amber-500/30 text-amber-300 px-1 py-0.5 rounded-md font-bold"
+                  title="Hint Penalty Time added to finish score"
+                >
+                  +{totalHintPenaltiesMins}m
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* GPS Calibration & Sensor Diagnostic Tool */}
+          <button
+            onClick={() => setShowGpsModal(true)}
+            className="w-8 h-8 rounded-2xl bg-zinc-950/85 backdrop-blur-xl border border-zinc-800 hover:border-cyan-400/50 flex items-center justify-center text-cyan-300 active:scale-95 transition-all shadow-2xl text-xs"
+            title="Calibrate GPS Sensor & Diagnostics"
+          >
+            🎯
+          </button>
+
           {/* Satellite Layer Switcher */}
           <div className="bg-zinc-950/85 backdrop-blur-xl border border-zinc-800 px-2 py-1.5 rounded-2xl shadow-2xl">
             <select
@@ -666,24 +687,42 @@ export default function PlayDashboard() {
               </div>
             )}
 
-            {/* 3. External Links */}
+            {/* 3. External Dossier Links & Teammate QR Scanner */}
             {level && level.socialLinks.length > 0 && locationReached && (
-              <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-3 flex flex-col gap-2">
-                <span className="text-[9px] font-mono uppercase tracking-widest text-zinc-400 font-bold">
-                  EXTERNAL DOSSIER LINKS
-                </span>
-                <div className="flex flex-wrap gap-2">
+              <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-4 flex flex-col gap-3">
+                <div className="flex items-center justify-between border-b border-zinc-800/80 pb-2">
+                  <span className="text-[9px] font-mono uppercase tracking-widest text-zinc-400 font-bold flex items-center gap-1.5">
+                    <span>🔗</span> EXTERNAL DOSSIER INTEL & SOCIAL RECON
+                  </span>
+                  <span className="text-[10px] font-mono text-cyan-400 font-bold">
+                    {level.socialLinks.length} TARGET {level.socialLinks.length === 1 ? 'LINK' : 'LINKS'}
+                  </span>
+                </div>
+
+                <div className="flex flex-col gap-3">
                   {level.socialLinks.map((sl, i) => (
-                    <a
-                      key={i}
-                      href={sl.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="px-2.5 py-1 rounded-lg bg-zinc-800 border border-zinc-700 text-cyan-300 text-xs font-mono uppercase hover:border-zinc-500 transition-all flex items-center gap-1.5"
-                    >
-                      <span>{sl.platform}</span>
-                      <span className="text-[10px]">↗</span>
-                    </a>
+                    <div key={i} className="flex flex-col gap-2.5 p-3.5 bg-zinc-950/70 border border-zinc-800/80 rounded-xl">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-mono font-bold text-white uppercase flex items-center gap-1.5">
+                          <span>🌐</span> {sl.platform}
+                        </span>
+                        <a
+                          href={sl.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-cyan-300 text-[11px] font-mono uppercase transition-all flex items-center gap-1"
+                        >
+                          <span>Open On Device</span>
+                          <span className="text-[10px]">↗</span>
+                        </a>
+                      </div>
+
+                      {/* Inline Scannable QR Code for Teammate Scan */}
+                      <QrCodeDisplay
+                        url={sl.url}
+                        label={`SCAN FOR ${sl.platform.toUpperCase()}`}
+                      />
+                    </div>
                   ))}
                 </div>
               </div>
@@ -870,9 +909,20 @@ export default function PlayDashboard() {
             <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-3.5 flex flex-col gap-2 text-xs font-mono">
               <div className="flex items-center justify-between text-zinc-300">
                 <span>GPS Sensor</span>
-                <span className="text-emerald-400 font-bold">
-                  {pos ? `ONLINE (±${Math.round(pos.accuracy)}m)` : 'SEARCHING…'}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-emerald-400 font-bold">
+                    {pos ? `ONLINE (±${Math.round(pos.accuracy)}m)` : 'SEARCHING…'}
+                  </span>
+                  <button
+                    onClick={() => {
+                      setShowProfileModal(false);
+                      setShowGpsModal(true);
+                    }}
+                    className="px-2 py-0.5 rounded bg-cyan-950/80 border border-cyan-400/40 text-cyan-300 text-[10px] font-bold hover:bg-cyan-900 transition-colors"
+                  >
+                    CALIBRATE
+                  </button>
+                </div>
               </div>
               <div className="flex items-center justify-between text-zinc-300">
                 <span>Telemetry Stream</span>
@@ -892,6 +942,16 @@ export default function PlayDashboard() {
           </div>
         </div>
       )}
+
+      {/* =========================================================================
+          GPS CALIBRATION & SENSOR DIAGNOSTIC MODAL
+          ========================================================================= */}
+      <GpsCalibrationModal
+        isOpen={showGpsModal}
+        onClose={() => setShowGpsModal(false)}
+        pos={pos}
+        refreshLocation={refreshLocation}
+      />
 
       {/* =========================================================================
           CELEBRATION CLUE DROP MODAL

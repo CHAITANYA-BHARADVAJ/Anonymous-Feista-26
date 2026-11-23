@@ -134,6 +134,11 @@ export const api = {
     }),
   getLevels: (gameId: number) => request<any[]>(`/levels/game/${gameId}`),
   generate26Pack: (gameId: number) => request<any>(`/levels/game/${gameId}/generate-25-pack`, { method: 'POST' }),
+  deployPool: (gameId: number, poolClues: any[]) =>
+    request<{ ok: boolean; count: number; levels: any[] }>(`/levels/game/${gameId}/deploy-pool`, {
+      method: 'POST',
+      body: JSON.stringify({ poolClues }),
+    }),
   createLevel: (gameId: number, data: any) =>
     request<any>(`/levels/game/${gameId}`, { method: 'POST', body: JSON.stringify(data) }),
   updateLevel: (id: number, data: any) =>

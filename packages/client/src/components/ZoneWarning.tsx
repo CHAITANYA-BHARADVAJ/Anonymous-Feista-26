@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getSocket } from '../lib/socket';
+import { playZoneWarningAlarm, triggerHaptic } from '../lib/sound';
 
 export default function ZoneWarning() {
   const [warning, setWarning] = useState<{ label: string | null; penaltyMins: number } | null>(null);
@@ -8,8 +9,9 @@ export default function ZoneWarning() {
     const socket = getSocket();
     socket.on('zone:entered', (data: { label: string | null; penaltyMins: number }) => {
       setWarning(data);
-      if ('vibrate' in navigator) navigator.vibrate([300, 100, 300, 100, 300]);
-      setTimeout(() => setWarning(null), 6000);
+      playZoneWarningAlarm();
+      triggerHaptic([300, 150, 300, 150, 300]);
+      setTimeout(() => setWarning(null), 8000);
     });
     return () => { socket.off('zone:entered'); };
   }, []);

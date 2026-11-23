@@ -3,6 +3,7 @@ import { api } from '../../lib/api';
 import { MapContainer, TileLayer, Marker, Circle, Polygon, Popup, useMapEvents } from 'react-leaflet';
 import { MapResizer } from '../../components/MapResizer';
 import { SDMCET_CENTER, SDMCET_MAX_BOUNDS, SDMCET_CAMPUS_POLYGON, SATELLITE_SOURCES } from '../../lib/mapConfig';
+import { SDMCET_DEFAULT_POOL, PoolClue } from '../../lib/cluePoolDefaults';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -27,6 +28,25 @@ const activeEditingPinIcon = L.divIcon({
   iconAnchor: [14, 14],
 });
 
+const poolPinIcon = L.divIcon({
+  className: 'custom-admin-pool-pin',
+  html: `<div class="relative flex items-center justify-center">
+    <div class="w-6 h-6 rounded-full bg-zinc-700 border-2 border-zinc-950 shadow-md flex items-center justify-center text-[10px] text-zinc-300 font-mono">🎪</div>
+  </div>`,
+  iconSize: [24, 24],
+  iconAnchor: [12, 12],
+});
+
+const poolSelectedPinIcon = L.divIcon({
+  className: 'custom-admin-pool-selected-pin',
+  html: `<div class="relative flex items-center justify-center">
+    <div class="absolute w-7 h-7 rounded-full bg-cyan-400/40 animate-ping"></div>
+    <div class="w-6 h-6 rounded-full bg-cyan-400 border-2 border-zinc-950 shadow-2xl flex items-center justify-center text-[10px] text-zinc-950 font-black font-mono">★</div>
+  </div>`,
+  iconSize: [24, 24],
+  iconAnchor: [12, 12],
+});
+
 // Helper: Convert center (lat, lng) and radius into 16-point GeoJSON Polygon coordinates
 function circleToPolygonCoordinates(lat: number, lng: number, radiusMeters: number, points = 16): [number, number][] {
   const coords: [number, number][] = [];
@@ -49,10 +69,12 @@ function MapStudioClickHandler({
   studioMode,
   onTargetPicked,
   onZonePointAdded,
+  onPoolTargetPicked,
 }: {
-  studioMode: 'level' | 'restricted' | 'playing_area';
+  studioMode: 'level' | 'pool' | 'restricted' | 'playing_area';
   onTargetPicked: (lat: number, lng: number) => void;
   onZonePointAdded: (lat: number, lng: number) => void;
+  onPoolTargetPicked: (lat: number, lng: number) => void;
 }) {
   useMapEvents({
     click(e) {
@@ -60,6 +82,8 @@ function MapStudioClickHandler({
       const lng = Number(e.latlng.lng.toFixed(6));
       if (studioMode === 'level') {
         onTargetPicked(lat, lng);
+      } else if (studioMode === 'pool') {
+        onPoolTargetPicked(lat, lng);
       } else {
         onZonePointAdded(lat, lng);
       }
@@ -83,8 +107,29 @@ export default function AdminLevels() {
   const [zones, setZones] = useState<any[]>([]);
   const [selectedLevelId, setSelectedLevelId] = useState<number | null>(null);
 
-  // Studio Mode: 'level' (objectives) | 'restricted' (hazard zones) | 'playing_area' (boundary)
-  const [studioMode, setStudioMode] = useState<'level' | 'restricted' | 'playing_area'>('level');
+  // Studio Mode: 'level' (objectives) | 'pool' (clue library) | 'restricted' (hazard zones) | 'playing_area' (boundary)
+  const [studioMode, setStudioMode] = useState<'level' | 'pool' | 'restricted' | 'playing_area'>('level');
+
+  // Clue Pool State
+  const [poolClues, setPoolClues] = useState<PoolClue[]>(() => {
+    try {
+      const saved = localStorage.getItem('ch-clue-pool');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return SDMCET_DEFAULT_POOL;
+  });
+
+  const [selectedPoolIds, setSelectedPoolIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('ch-clue-pool-selected');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return SDMCET_DEFAULT_POOL.map((c) => c.id);
+  });
+
+  const [editingPoolClue, setEditingPoolClue] = useState<PoolClue | null>(null);
+  const [poolSearchQuery, setPoolSearchQuery] = useState<string>('');
+  const [isDeployingPool, setIsDeployingPool] = useState<boolean>(false);
 
   // Level Edit Form State
   const [editForm, setEditForm] = useState<any>(null);
@@ -93,6 +138,7 @@ export default function AdminLevels() {
     { text: '', penaltyMins: 4 },
     { text: '', penaltyMins: 6 },
   ]);
+  const [socialLinksList, setSocialLinksList] = useState<Array<{ platform: string; url: string }>>([]);
   const [isSavingLevel, setIsSavingLevel] = useState(false);
   const [deleteConfirmLevel, setDeleteConfirmLevel] = useState<any | null>(null);
 
@@ -157,6 +203,7 @@ export default function AdminLevels() {
       { text: existingHints[2]?.text ?? '', penaltyMins: existingHints[2]?.penaltyMins ?? 6 },
     ];
     setHintsList(populated);
+    setSocialLinksList(lvl.socialLinks ? lvl.socialLinks.map((s: any) => ({ platform: s.platform || 'Social Intel', url: s.url })) : []);
   }
 
   async function handleGenerate26Pack() {
@@ -197,6 +244,7 @@ export default function AdminLevels() {
       { text: '', penaltyMins: 4 },
       { text: '', penaltyMins: 6 },
     ]);
+    setSocialLinksList([]);
   }
 
   function handleMapTargetPicked(lat: number, lng: number) {
@@ -206,6 +254,134 @@ export default function AdminLevels() {
       targetLat: lat,
       targetLng: lng,
     }));
+  }
+
+  function handlePoolTargetPicked(lat: number, lng: number) {
+    if (editingPoolClue) {
+      setEditingPoolClue((prev) => (prev ? { ...prev, targetLat: lat, targetLng: lng } : null));
+    }
+  }
+
+  // Clue Pool Persistence Helper
+  function updatePoolClues(updated: PoolClue[], updatedSelected?: string[]) {
+    setPoolClues(updated);
+    try {
+      localStorage.setItem('ch-clue-pool', JSON.stringify(updated));
+      if (updatedSelected !== undefined) {
+        setSelectedPoolIds(updatedSelected);
+        localStorage.setItem('ch-clue-pool-selected', JSON.stringify(updatedSelected));
+      }
+    } catch (e) {
+      console.error('Failed to save clue pool to localStorage', e);
+    }
+  }
+
+  // Toggle single clue selection in pool
+  function togglePoolSelection(id: string) {
+    const next = selectedPoolIds.includes(id)
+      ? selectedPoolIds.filter((item) => item !== id)
+      : [...selectedPoolIds, id];
+    setSelectedPoolIds(next);
+    try {
+      localStorage.setItem('ch-clue-pool-selected', JSON.stringify(next));
+    } catch {}
+  }
+
+  // Select all or clear selection
+  function handleSelectAllPool(select: boolean) {
+    const next = select ? poolClues.map((c) => c.id) : [];
+    setSelectedPoolIds(next);
+    try {
+      localStorage.setItem('ch-clue-pool-selected', JSON.stringify(next));
+    } catch {}
+  }
+
+  // Reset pool to 26 campus presets
+  function handleResetPoolToDefaults() {
+    if (confirm('Reset Clue Pool to the default 26 SDMCET Campus Landmarks library? Any custom modifications will be replaced.')) {
+      updatePoolClues(SDMCET_DEFAULT_POOL, SDMCET_DEFAULT_POOL.map((c) => c.id));
+      alert('✓ Clue Pool successfully reset to 26 SDMCET Campus Landmarks!');
+    }
+  }
+
+  // Start adding a new custom clue to the pool
+  function handleOpenAddPoolClue() {
+    const newId = `pool-custom-${Date.now()}`;
+    setEditingPoolClue({
+      id: newId,
+      title: `Custom Landmark ${poolClues.length + 1}`,
+      clueText: '',
+      locationHint: '',
+      answer: '',
+      targetLat: SDMCET_CENTER[0],
+      targetLng: SDMCET_CENTER[1],
+      triggerRadiusMeters: 25,
+      isFinal: false,
+      hints: [
+        { text: '', penaltyMins: 2 },
+        { text: '', penaltyMins: 4 },
+        { text: '', penaltyMins: 6 },
+      ],
+      socialLinks: [],
+    });
+  }
+
+  // Save the pool clue being edited
+  function handleSavePoolClue(clue: PoolClue) {
+    const existingIdx = poolClues.findIndex((c) => c.id === clue.id);
+    let nextPool: PoolClue[];
+    let nextSelected = [...selectedPoolIds];
+
+    if (existingIdx >= 0) {
+      nextPool = [...poolClues];
+      nextPool[existingIdx] = clue;
+    } else {
+      nextPool = [...poolClues, clue];
+      if (!nextSelected.includes(clue.id)) {
+        nextSelected.push(clue.id);
+      }
+    }
+
+    updatePoolClues(nextPool, nextSelected);
+    setEditingPoolClue(null);
+  }
+
+  // Delete clue from pool
+  function handleDeletePoolClue(id: string) {
+    if (!confirm('Remove this clue from your pool library?')) return;
+    const nextPool = poolClues.filter((c) => c.id !== id);
+    const nextSelected = selectedPoolIds.filter((item) => item !== id);
+    updatePoolClues(nextPool, nextSelected);
+    if (editingPoolClue?.id === id) {
+      setEditingPoolClue(null);
+    }
+  }
+
+  // 1-Click Deploy Selected Pool Clues into Active Game
+  async function handleDeploySelectedPool() {
+    if (!game) return;
+    const selected = poolClues.filter((c) => selectedPoolIds.includes(c.id));
+    if (selected.length === 0) {
+      alert('Please select at least 1 clue from the pool to deploy.');
+      return;
+    }
+
+    const ok = confirm(
+      `Deploy ${selected.length} selected clues from the pool to the active game?\n\nThis will configure ${selected.length} stages for current gameplay and automatically set up team paths.`
+    );
+    if (!ok) return;
+
+    setIsDeployingPool(true);
+    try {
+      const res = await api.deployPool(game.id, selected);
+      await reload();
+      setStudioMode('level');
+      alert(`✓ Successfully deployed ${res.count || selected.length} clues to the active game!`);
+    } catch (err: any) {
+      alert(err.message ?? 'Failed to deploy pool clues');
+    } finally {
+      setIsDeployingPool(false);
+    }
   }
 
   function handleZonePointAdded(lat: number, lng: number) {
@@ -234,6 +410,7 @@ export default function AdminLevels() {
         durationSecs: editForm.durationSecs ? Number(editForm.durationSecs) : null,
         isFinal: Boolean(editForm.isFinal),
         hints: hintsList.filter((h) => h.text.trim().length > 0),
+        socialLinks: socialLinksList.filter((s) => s.url.trim().length > 0),
       };
 
       if (editForm.id) {
@@ -405,6 +582,18 @@ export default function AdminLevels() {
           </button>
 
           <button
+            onClick={() => setStudioMode('pool')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-mono font-bold transition-all flex items-center gap-1.5 ${
+              studioMode === 'pool'
+                ? 'bg-amber-950/80 text-amber-300 border border-amber-500/40 shadow-md'
+                : 'text-zinc-400 hover:text-amber-400'
+            }`}
+          >
+            <span>🎪</span>
+            <span>Clue Pool Studio ({poolClues.length})</span>
+          </button>
+
+          <button
             onClick={() => setStudioMode('restricted')}
             className={`px-3.5 py-1.5 rounded-lg text-xs font-mono font-bold transition-all flex items-center gap-1.5 ${
               studioMode === 'restricted'
@@ -447,6 +636,10 @@ export default function AdminLevels() {
                   ? editForm
                     ? `📍 Click Map to Place: ${editForm.title}`
                     : 'Select or Create an Objective'
+                  : studioMode === 'pool'
+                  ? editingPoolClue
+                    ? `🎪 Click Map to Position: ${editingPoolClue.title}`
+                    : '🎪 Clue Pool Studio: Inspect landmarks or check to select'
                   : studioMode === 'restricted'
                   ? '🚫 Click Map to Draw Restricted Danger Zone'
                   : '🟢 Click Map to Draw Playing Boundary'}
@@ -532,10 +725,54 @@ export default function AdminLevels() {
                 studioMode={studioMode}
                 onTargetPicked={handleMapTargetPicked}
                 onZonePointAdded={handleZonePointAdded}
+                onPoolTargetPicked={handlePoolTargetPicked}
               />
 
+              {/* Pool Clues Markers (when in Pool Studio Mode) */}
+              {studioMode === 'pool' &&
+                poolClues.map((clue, idx) => {
+                  if (clue.targetLat == null || clue.targetLng == null) return null;
+                  const isSelected = selectedPoolIds.includes(clue.id);
+                  const isEditing = editingPoolClue?.id === clue.id;
+
+                  return (
+                    <div key={clue.id}>
+                      <Circle
+                        center={[clue.targetLat, clue.targetLng]}
+                        radius={clue.triggerRadiusMeters ?? 25}
+                        pathOptions={{
+                          color: isEditing ? '#10b981' : isSelected ? '#38bdf8' : '#71717a',
+                          fillColor: isEditing ? '#10b981' : isSelected ? '#38bdf8' : '#71717a',
+                          fillOpacity: isEditing ? 0.35 : isSelected ? 0.2 : 0.05,
+                          weight: isEditing ? 2.5 : isSelected ? 2 : 1,
+                        }}
+                      />
+                      <Marker
+                        position={[clue.targetLat, clue.targetLng]}
+                        icon={isEditing ? activeEditingPinIcon : isSelected ? poolSelectedPinIcon : poolPinIcon}
+                        eventHandlers={{
+                          click: () => {
+                            setEditingPoolClue(clue);
+                          },
+                        }}
+                      >
+                        <Popup>
+                          <div className="text-xs font-mono">
+                            <p className="font-bold text-zinc-900">{clue.title}</p>
+                            <p className="text-zinc-600">Pool Landmark #{idx + 1}</p>
+                            <p className="text-zinc-600">{clue.locationHint}</p>
+                            <p className={isSelected ? 'text-cyan-700 font-bold' : 'text-zinc-500'}>
+                              {isSelected ? '✓ Selected for Live Deployment' : '○ Not selected'}
+                            </p>
+                          </div>
+                        </Popup>
+                      </Marker>
+                    </div>
+                  );
+                })}
+
               {/* Existing Level Targets */}
-              {levels.map((lvl) => {
+              {studioMode !== 'pool' && levels.map((lvl) => {
                 if (lvl.targetLat == null || lvl.targetLng == null) return null;
                 const isSelected = selectedLevelId === lvl.id && studioMode === 'level';
 
@@ -927,6 +1164,64 @@ export default function AdminLevels() {
                     </div>
                   </div>
 
+                  {/* Section 5: External Clue Signals & Social Intel (Inline QR Code Generator) */}
+                  <div className="bg-zinc-950/80 border border-zinc-800 rounded-xl p-3 flex flex-col gap-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-mono uppercase tracking-widest text-cyan-400 font-bold flex items-center gap-1">
+                        <span>🌐</span>
+                        <span>7. EXTERNAL CLUE INTEL & SOCIAL MEDIA LINKS</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setSocialLinksList([...socialLinksList, { platform: 'Instagram Dossier', url: '' }])}
+                        className="text-[10px] font-mono text-cyan-300 hover:text-cyan-200 bg-cyan-950/50 border border-cyan-500/30 px-2 py-0.5 rounded-lg transition-all"
+                      >
+                        ➕ Add Link
+                      </button>
+                    </div>
+                    <p className="text-[10px] font-mono text-zinc-400">
+                      Add social media links (Instagram, YouTube, Drive). Inline scannable QR codes are automatically generated for teammates to scan on secondary phones!
+                    </p>
+                    {socialLinksList.length === 0 ? (
+                      <span className="text-[10px] font-mono text-zinc-500 italic">No external social links attached to this stage.</span>
+                    ) : (
+                      socialLinksList.map((sl, sIdx) => (
+                        <div key={sIdx} className="flex items-center gap-1.5">
+                          <input
+                            type="text"
+                            value={sl.platform}
+                            onChange={(e) => {
+                              const updated = [...socialLinksList];
+                              updated[sIdx].platform = e.target.value;
+                              setSocialLinksList(updated);
+                            }}
+                            placeholder="Platform (e.g. Instagram)"
+                            className="w-1/3 px-2 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-xs text-white font-mono focus:outline-none focus:border-cyan-400"
+                          />
+                          <input
+                            type="url"
+                            value={sl.url}
+                            onChange={(e) => {
+                              const updated = [...socialLinksList];
+                              updated[sIdx].url = e.target.value;
+                              setSocialLinksList(updated);
+                            }}
+                            placeholder="https://..."
+                            className="flex-1 px-2 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-xs text-white font-mono focus:outline-none focus:border-cyan-400"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setSocialLinksList(socialLinksList.filter((_, i) => i !== sIdx))}
+                            className="text-zinc-500 hover:text-rose-400 text-xs px-1.5 py-1"
+                            title="Remove link"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
                   {/* Save Button */}
                   <button
                     type="submit"
@@ -938,6 +1233,194 @@ export default function AdminLevels() {
                 </form>
               )}
             </>
+          )}
+
+          {/* ===================================================================
+              MODE 4: CLUE POOL STUDIO (MASTER CLUE REPOSITORY)
+              =================================================================== */}
+          {studioMode === 'pool' && (
+            <div className="flex flex-col gap-4">
+              {/* Pool Header & Stats Banner */}
+              <div className="bg-zinc-900/80 border border-zinc-800 rounded-2xl p-4 flex flex-col gap-3 shadow-xl">
+                <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
+                  <div className="flex items-center gap-2">
+                    <span className="text-base">🎪</span>
+                    <span className="text-xs font-mono font-bold text-white uppercase tracking-wider">
+                      Clue Pool Library
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={handleResetPoolToDefaults}
+                      className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-mono rounded-xl transition-all flex items-center gap-1 border border-zinc-700"
+                      title="Reset pool to 26 SDMCET campus landmarks"
+                    >
+                      <span>↺</span>
+                      <span>Reset 26 Pack</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleOpenAddPoolClue}
+                      className="px-3 py-1.5 bg-cyan-400 hover:bg-cyan-300 text-zinc-950 text-xs font-mono font-black rounded-xl transition-all shadow-md flex items-center gap-1 active:scale-95"
+                    >
+                      <span>➕</span>
+                      <span>Add Pool Clue</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 1-Click Live Deployment Card */}
+                <div className="bg-gradient-to-r from-amber-500/15 via-cyan-500/10 to-emerald-500/10 border border-amber-500/30 rounded-xl p-3.5 flex flex-col gap-2.5 shadow-lg">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping" />
+                      <span className="text-xs font-mono font-black text-amber-300 uppercase tracking-wider">
+                        Deploy Clues to Live Game
+                      </span>
+                    </div>
+                    <span className="text-xs font-mono font-bold text-white bg-zinc-950/80 border border-zinc-800 px-2.5 py-0.5 rounded-full">
+                      {selectedPoolIds.length} of {poolClues.length} Selected
+                    </span>
+                  </div>
+                  <p className="text-[11px] font-mono text-zinc-300 leading-relaxed">
+                    Select a subset of landmarks from your clue bank below. When ready, 1-click deploy instantly configures the hunt stages for live gameplay!
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleDeploySelectedPool}
+                    disabled={isDeployingPool || selectedPoolIds.length === 0}
+                    className="w-full py-2.5 px-4 bg-amber-400 hover:bg-amber-300 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed text-zinc-950 font-mono font-black text-xs uppercase tracking-wider rounded-xl shadow-xl transition-all flex items-center justify-center gap-2"
+                  >
+                    <span>🚀</span>
+                    <span>
+                      {isDeployingPool
+                        ? 'DEPLOYING SELECTED CLUES…'
+                        : `DEPLOY ${selectedPoolIds.length} SELECTED CLUES TO GAME →`}
+                    </span>
+                  </button>
+                </div>
+
+                {/* Search & Bulk Select Controls */}
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-1">
+                  <input
+                    type="text"
+                    value={poolSearchQuery}
+                    onChange={(e) => setPoolSearchQuery(e.target.value)}
+                    placeholder="Search pool landmarks, answers, or riddles…"
+                    className="w-full sm:flex-1 px-3 py-1.5 bg-zinc-950 border border-zinc-800 rounded-xl text-xs text-white placeholder-zinc-500 font-mono focus:outline-none focus:border-amber-400"
+                  />
+                  <div className="flex items-center gap-1.5 self-end shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleSelectAllPool(true)}
+                      className="px-2 py-1 bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-[10px] font-mono text-zinc-300 rounded-lg transition-all"
+                    >
+                      Select All
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectAllPool(false)}
+                      className="px-2 py-1 bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-[10px] font-mono text-zinc-300 rounded-lg transition-all"
+                    >
+                      Clear Selection
+                    </button>
+                  </div>
+                </div>
+
+                {/* Pool Clues Scrollable Roster */}
+                <div className="space-y-2 max-h-[460px] overflow-y-auto pr-1 mt-1">
+                  {poolClues
+                    .filter((c) => {
+                      if (!poolSearchQuery.trim()) return true;
+                      const q = poolSearchQuery.toLowerCase();
+                      return (
+                        c.title.toLowerCase().includes(q) ||
+                        c.locationHint.toLowerCase().includes(q) ||
+                        c.clueText.toLowerCase().includes(q) ||
+                        c.answer.toLowerCase().includes(q)
+                      );
+                    })
+                    .map((clue, idx) => {
+                      const isSelected = selectedPoolIds.includes(clue.id);
+                      return (
+                        <div
+                          key={clue.id}
+                          className={`p-3 rounded-xl border transition-all text-xs flex flex-col gap-2 ${
+                            isSelected
+                              ? 'bg-zinc-950/90 border-amber-400/50 shadow-md'
+                              : 'bg-zinc-950/40 border-zinc-800/70 text-zinc-400 opacity-80'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <label className="flex items-center gap-2 cursor-pointer flex-1 truncate">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => togglePoolSelection(clue.id)}
+                                className="w-4 h-4 rounded bg-zinc-900 border-zinc-700 text-amber-400 accent-amber-400 cursor-pointer"
+                              />
+                              <span className="font-mono text-[10px] text-zinc-500 font-bold">
+                                #{idx + 1}
+                              </span>
+                              <span className="font-bold text-white truncate">{clue.title}</span>
+                              {clue.isFinal && (
+                                <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 font-mono font-bold shrink-0">
+                                  FINALE 🏁
+                                </span>
+                              )}
+                            </label>
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => setEditingPoolClue(clue)}
+                                className="px-2 py-0.5 bg-zinc-800 hover:bg-zinc-700 text-cyan-300 rounded text-[10px] font-mono transition-all"
+                              >
+                                ✏️ Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeletePoolClue(clue.id)}
+                                className="w-6 h-6 rounded flex items-center justify-center text-zinc-500 hover:text-rose-400 hover:bg-rose-950/30 transition-all"
+                                title="Remove Clue"
+                              >
+                                🗑
+                              </button>
+                            </div>
+                          </div>
+
+                          <p className="text-[11px] text-zinc-400 font-mono line-clamp-2 pl-6">
+                            {clue.clueText || 'No clue description set.'}
+                          </p>
+
+                          <div className="flex flex-wrap items-center gap-2 pl-6 text-[10px] font-mono">
+                            <span className="text-zinc-500">📍 {clue.locationHint || 'Campus'}</span>
+                            {clue.answer && (
+                              <span className="bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-800 text-cyan-300">
+                                KEY: {clue.answer.toUpperCase()}
+                              </span>
+                            )}
+                            <span className="text-zinc-500">
+                              🎯 {clue.triggerRadiusMeters ?? 25}m
+                            </span>
+                            {clue.hints && clue.hints.filter((h) => h.text.trim()).length > 0 && (
+                              <span className="text-amber-400/90">
+                                💡 {clue.hints.filter((h) => h.text.trim()).length} hint(s)
+                              </span>
+                            )}
+                            {clue.socialLinks && clue.socialLinks.length > 0 && (
+                              <span className="text-cyan-400">
+                                🌐 {clue.socialLinks.length} social link(s) (QR)
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            </div>
           )}
 
           {/* ===================================================================
@@ -1186,6 +1669,225 @@ export default function AdminLevels() {
                 className="flex-1 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow"
               >
                 Yes, Delete Level
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          EDIT / CREATE POOL CLUE MODAL
+          ========================================================================= */}
+      {editingPoolClue && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-zinc-900 border border-zinc-700 rounded-2xl max-w-lg w-full p-5 shadow-2xl flex flex-col gap-4 my-8">
+            <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
+              <h3 className="font-bold text-white text-base flex items-center gap-2">
+                <span>🎪</span>
+                <span>Configure Pool Landmark Clue</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setEditingPoolClue(null)}
+                className="text-zinc-400 hover:text-white font-mono text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-3 max-h-[70vh] overflow-y-auto pr-1 text-xs">
+              <div>
+                <label className="block text-[10px] font-mono uppercase text-zinc-400 font-bold mb-1">
+                  CLUE TITLE
+                </label>
+                <input
+                  type="text"
+                  value={editingPoolClue.title}
+                  onChange={(e) => setEditingPoolClue({ ...editingPoolClue, title: e.target.value })}
+                  placeholder="e.g. Science Block Board"
+                  className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-white font-medium focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-mono uppercase text-zinc-400 font-bold mb-1">
+                  CAMPUS SECTOR GUIDANCE
+                </label>
+                <input
+                  type="text"
+                  value={editingPoolClue.locationHint}
+                  onChange={(e) => setEditingPoolClue({ ...editingPoolClue, locationHint: e.target.value })}
+                  placeholder="e.g. Science Block Ground Floor"
+                  className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-white focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-mono uppercase text-zinc-400 font-bold mb-1">
+                  CLUE RIDDLE / DIRECTIVE
+                </label>
+                <textarea
+                  rows={2}
+                  value={editingPoolClue.clueText}
+                  onChange={(e) => setEditingPoolClue({ ...editingPoolClue, clueText: e.target.value })}
+                  placeholder="Enter decrypted clue riddle text…"
+                  className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-white focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 py-1">
+                <input
+                  type="checkbox"
+                  id="poolIsFinal"
+                  checked={Boolean(editingPoolClue.isFinal)}
+                  onChange={(e) => setEditingPoolClue({ ...editingPoolClue, isFinal: e.target.checked })}
+                  className="w-4 h-4 rounded bg-zinc-950 border-zinc-700 text-emerald-400"
+                />
+                <label htmlFor="poolIsFinal" className="text-zinc-200 font-mono font-bold">
+                  🏁 Mark as Grand Finale Objective
+                </label>
+              </div>
+
+              {!editingPoolClue.isFinal && (
+                <div>
+                  <label className="block text-[10px] font-mono uppercase text-zinc-400 font-bold mb-1">
+                    SECRET PASSCODE / ANSWER
+                  </label>
+                  <input
+                    type="text"
+                    value={editingPoolClue.answer}
+                    onChange={(e) => setEditingPoolClue({ ...editingPoolClue, answer: e.target.value })}
+                    placeholder="e.g. quantum"
+                    className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl font-mono text-cyan-300 focus:outline-none focus:border-amber-400 uppercase"
+                  />
+                </div>
+              )}
+
+              {/* Coordinates */}
+              <div className="bg-zinc-950/80 border border-zinc-800 rounded-xl p-3 flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-mono uppercase text-cyan-400 font-bold">
+                    SATELLITE COORDINATES & GEOFENCE
+                  </span>
+                  <span className="text-[10px] font-mono text-zinc-400">
+                    Radius: {editingPoolClue.triggerRadiusMeters ?? 25}m
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-zinc-300 font-mono text-[11px]">
+                  <div className="bg-zinc-900 p-2 rounded-lg border border-zinc-800">
+                    <span className="text-[9px] text-zinc-500 block">LATITUDE</span>
+                    <span>{editingPoolClue.targetLat ? Number(editingPoolClue.targetLat).toFixed(5) : '—'}</span>
+                  </div>
+                  <div className="bg-zinc-900 p-2 rounded-lg border border-zinc-800">
+                    <span className="text-[9px] text-zinc-500 block">LONGITUDE</span>
+                    <span>{editingPoolClue.targetLng ? Number(editingPoolClue.targetLng).toFixed(5) : '—'}</span>
+                  </div>
+                </div>
+                <span className="text-[9px] font-mono text-amber-400/80">
+                  👉 Click anywhere on the satellite map in background to reposition coordinates.
+                </span>
+              </div>
+
+              {/* Tactical Hints */}
+              <div className="bg-zinc-950/80 border border-zinc-800 rounded-xl p-3 flex flex-col gap-2">
+                <span className="text-[10px] font-mono uppercase text-amber-400 font-bold">
+                  TACTICAL HINTS & TIME PENALTIES
+                </span>
+                {editingPoolClue.hints.map((hint, hIdx) => (
+                  <div key={hIdx} className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-mono font-bold text-amber-300 w-12 shrink-0">
+                      #{hIdx + 1} (+{hint.penaltyMins}m):
+                    </span>
+                    <input
+                      type="text"
+                      value={hint.text}
+                      onChange={(e) => {
+                        const updated = [...editingPoolClue.hints];
+                        updated[hIdx] = { ...updated[hIdx], text: e.target.value };
+                        setEditingPoolClue({ ...editingPoolClue, hints: updated });
+                      }}
+                      placeholder={`Hint #${hIdx + 1} assistance text…`}
+                      className="flex-1 px-2.5 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-white font-mono focus:outline-none focus:border-amber-400"
+                    />
+                  </div>
+                ))}
+              </div>
+
+              {/* Social Media Links (QR code) */}
+              <div className="bg-zinc-950/80 border border-zinc-800 rounded-xl p-3 flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-mono uppercase text-cyan-400 font-bold">
+                    SOCIAL MEDIA LINKS (QR CODE)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditingPoolClue({
+                        ...editingPoolClue,
+                        socialLinks: [
+                          ...(editingPoolClue.socialLinks || []),
+                          { platform: 'Instagram Dossier', url: '' },
+                        ],
+                      })
+                    }
+                    className="text-[10px] font-mono text-cyan-300 hover:text-cyan-200 bg-cyan-950/50 border border-cyan-500/30 px-2 py-0.5 rounded-lg"
+                  >
+                    ➕ Add Link
+                  </button>
+                </div>
+                {(editingPoolClue.socialLinks || []).map((sl, slIdx) => (
+                  <div key={slIdx} className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      value={sl.platform}
+                      onChange={(e) => {
+                        const updated = [...(editingPoolClue.socialLinks || [])];
+                        updated[slIdx].platform = e.target.value;
+                        setEditingPoolClue({ ...editingPoolClue, socialLinks: updated });
+                      }}
+                      placeholder="Platform"
+                      className="w-1/3 px-2 py-1 bg-zinc-900 border border-zinc-800 rounded-lg text-white font-mono"
+                    />
+                    <input
+                      type="url"
+                      value={sl.url}
+                      onChange={(e) => {
+                        const updated = [...(editingPoolClue.socialLinks || [])];
+                        updated[slIdx].url = e.target.value;
+                        setEditingPoolClue({ ...editingPoolClue, socialLinks: updated });
+                      }}
+                      placeholder="https://..."
+                      className="flex-1 px-2 py-1 bg-zinc-900 border border-zinc-800 rounded-lg text-white font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const updated = (editingPoolClue.socialLinks || []).filter((_, i) => i !== slIdx);
+                        setEditingPoolClue({ ...editingPoolClue, socialLinks: updated });
+                      }}
+                      className="text-zinc-500 hover:text-rose-400 text-xs px-1"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 pt-2 border-t border-zinc-800">
+              <button
+                type="button"
+                onClick={() => setEditingPoolClue(null)}
+                className="flex-1 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSavePoolClue(editingPoolClue)}
+                className="flex-1 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-zinc-950 text-xs font-black font-mono shadow"
+              >
+                Save Clue to Pool ✓
               </button>
             </div>
           </div>
