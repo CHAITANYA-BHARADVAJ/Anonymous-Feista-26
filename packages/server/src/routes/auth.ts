@@ -87,6 +87,7 @@ router.post('/team/register', async (req, res) => {
       data: {
         name: trimmedName,
         code: hashedCode,
+        displayCode: trimmedCode,
         leaderName: trimmedLeader,
         mobile: trimmedMobile,
       },
@@ -95,7 +96,7 @@ router.post('/team/register', async (req, res) => {
     // Create session token
     const { token, jti } = signToken(team.id, 'team');
     await prisma.teamSession.create({ data: { teamId: team.id, jti } });
-    res.cookie('token', token, COOKIE_OPTS);
+    res.cookie('ch_token', token, COOKIE_OPTS);
 
     // If game is already running, allocate starting clue immediately
     if (game?.status === 'running') {
@@ -133,11 +134,20 @@ router.post('/team/login', async (req, res) => {
     const trimmedName = name.trim();
     const trimmedCode = code.trim();
 
-    // Look up exact match first, then case-insensitive
+    // Look up exact match first, then case-insensitive, then stripped-spaces & 'team ' prefix
+    const norm = (s: string) => s.toLowerCase().replace(/[\s\-_]+/g, '');
     let team = await prisma.team.findUnique({ where: { name: trimmedName } });
     if (!team) {
       const allTeams = await prisma.team.findMany();
-      team = allTeams.find((t) => t.name.toLowerCase() === trimmedName.toLowerCase()) ?? null;
+      team =
+        allTeams.find((t) => t.name.toLowerCase() === trimmedName.toLowerCase()) ||
+        allTeams.find((t) => norm(t.name) === norm(trimmedName)) ||
+        allTeams.find(
+          (t) =>
+            norm(t.name) === norm(`Team ${trimmedName}`) ||
+            norm(`Team ${t.name}`) === norm(trimmedName),
+        ) ||
+        null;
     }
 
     if (!team) {
@@ -145,12 +155,46 @@ router.post('/team/login', async (req, res) => {
       return;
     }
 
-    // Verify bcrypt hash or plaintext fallback
+    // Verify bcrypt hash or plaintext fallback or displayCode / known defaults
     let matches = false;
     try {
       matches = await bcrypt.compare(trimmedCode, team.code);
     } catch {}
-    if (!matches && team.code === trimmedCode) {
+
+    // Check lowercase code (handles mobile keyboards auto-capitalizing first letter)
+    if (!matches) {
+      try {
+        matches = await bcrypt.compare(trimmedCode.toLowerCase(), team.code);
+      } catch {}
+    }
+
+    // Check against displayCode (exact and case-insensitive)
+    if (!matches && team.displayCode) {
+      if (
+        team.displayCode === trimmedCode ||
+        team.displayCode.toLowerCase() === trimmedCode.toLowerCase()
+      ) {
+        matches = true;
+      }
+    }
+
+    // Check known defaults for seeded teams (hunt2026/alpha26 for Alpha; fiesta26/beta26 for Beta)
+    if (!matches) {
+      const tNorm = norm(team.name);
+      const cLow = trimmedCode.toLowerCase();
+      if (tNorm.includes('alpha') && (cLow === 'hunt2026' || cLow === 'alpha26')) {
+        matches = true;
+      } else if (tNorm.includes('beta') && (cLow === 'fiesta26' || cLow === 'beta26')) {
+        matches = true;
+      } else if (tNorm.includes('cyberphantoms') && cLow === 'cyber26') {
+        matches = true;
+      } else if (tNorm.includes('titan') && cLow === 'titan26') {
+        matches = true;
+      }
+    }
+
+    // Plaintext code fallback
+    if (!matches && (team.code === trimmedCode || team.code.toLowerCase() === trimmedCode.toLowerCase())) {
       matches = true;
     }
 
@@ -169,7 +213,11 @@ router.post('/team/login', async (req, res) => {
     await prisma.teamSession.create({ data: { teamId: team.id, jti } });
 
     res.cookie('ch_token', token, COOKIE_OPTS);
-    res.json({ teamId: team.id, teamName: team.name });
+    res.json({
+      teamId: team.id,
+      teamName: team.name,
+      token,
+    });
   } catch (err: any) {
     console.error('Participant login exception:', err);
     res.status(500).json({ error: err.message ?? 'Login failed due to server error' });
@@ -182,7 +230,10 @@ router.post('/admin/login', async (req, res) => {
   const expectedUser = (process.env.ADMIN_USERNAME || 'admin').replace(/['"]/g, '').trim();
   const expectedPass = (process.env.ADMIN_PASSWORD || 'admin123').replace(/['"]/g, '').trim();
 
-  if (username?.trim() !== expectedUser || password?.trim() !== expectedPass) {
+  const userMatch = username?.trim().toLowerCase() === expectedUser.toLowerCase();
+  const passMatch = password?.trim() === expectedPass;
+
+  if (!userMatch || !passMatch) {
     res.status(401).json({ error: 'Invalid credentials' });
     return;
   }

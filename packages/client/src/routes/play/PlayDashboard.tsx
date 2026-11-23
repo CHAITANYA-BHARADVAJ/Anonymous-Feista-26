@@ -266,20 +266,6 @@ export default function PlayDashboard() {
     }
   }
 
-  // Emergency SOS Dispatch
-  async function handleSOS() {
-    if (
-      !confirm(
-        'DISPATCH EMERGENCY SOS TO FIELD COORDINATORS?\nYour exact GPS coordinates and timestamp will be transmitted to the command desk immediately.',
-      )
-    )
-      return;
-    navigator.geolocation.getCurrentPosition(async (position) => {
-      await api.sendSOS(position.coords.latitude, position.coords.longitude);
-      alert('EMERGENCY SOS TRANSMITTED. Command desk notified of your location.');
-    });
-  }
-
   // Sign out
   async function handleLogout() {
     if (!confirm('Sign out from this operative terminal?')) return;
@@ -357,7 +343,7 @@ export default function PlayDashboard() {
           </div>
         )}
 
-        {/* Right: Tactical Tools (Sat Switcher, GPS Center, Fullscreen, SOS) */}
+        {/* Right: Tactical Tools (Sat Switcher, GPS Center, Fullscreen) */}
         <div className="pointer-events-auto flex items-center gap-1.5">
           {/* Satellite Layer Switcher */}
           <div className="bg-zinc-950/85 backdrop-blur-xl border border-zinc-800 px-2 py-1.5 rounded-2xl shadow-2xl">
@@ -395,17 +381,6 @@ export default function PlayDashboard() {
               title="Fullscreen HUD"
             >
               <span className="text-xs">⛶</span>
-            </button>
-          )}
-
-          {/* Emergency SOS Button */}
-          {game?.status === 'running' && (
-            <button
-              onClick={handleSOS}
-              className="h-8 px-2.5 rounded-2xl bg-rose-950/80 border border-rose-500/50 text-rose-300 hover:text-white text-[10px] font-mono font-black active:scale-95 transition-all backdrop-blur-xl shadow-2xl flex items-center gap-1"
-              title="Emergency SOS to Command Desk"
-            >
-              <span>SOS</span>
             </button>
           )}
         </div>

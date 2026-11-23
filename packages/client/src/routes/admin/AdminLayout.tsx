@@ -9,7 +9,6 @@ export default function AdminLayout() {
   const clear = useAuthStore((s) => s.clear);
   const navigate = useNavigate();
 
-  const [sosCount, setSosCount] = useState(0);
   const [pendingPhotos, setPendingPhotos] = useState(0);
   const [isSidebarHovered, setIsSidebarHovered] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -19,25 +18,17 @@ export default function AdminLayout() {
     loadBadges();
 
     const socket = getSocket();
-    socket.on('sos:received', () => setSosCount((c) => c + 1));
-    socket.on('sos:resolved', () => setSosCount((c) => Math.max(0, c - 1)));
     socket.on('admin:photo_submitted', () => setPendingPhotos((c) => c + 1));
 
     return () => {
       cleanup();
-      socket.off('sos:received');
-      socket.off('sos:resolved');
       socket.off('admin:photo_submitted');
     };
   }, []);
 
   async function loadBadges() {
     try {
-      const [sos, photos] = await Promise.all([
-        api.getSosAlerts().catch(() => []),
-        api.getAdminPhotos().catch(() => []),
-      ]);
-      setSosCount(sos.length);
+      const photos = await api.getAdminPhotos().catch(() => []);
       setPendingPhotos(photos.filter((p: any) => p.status === 'pending').length);
     } catch {}
   }
@@ -59,8 +50,8 @@ export default function AdminLayout() {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
         </svg>
       ),
-      badge: sosCount > 0 ? `${sosCount} SOS` : null,
-      badgeColor: 'bg-rose-500/20 text-rose-400 border border-rose-500/40',
+      badge: null,
+      badgeColor: '',
     },
     {
       to: 'map',
@@ -271,11 +262,6 @@ export default function AdminLayout() {
           </div>
 
           <div className="flex items-center gap-2">
-            {sosCount > 0 && (
-              <span className="text-[10px] font-mono font-bold bg-rose-500/20 text-rose-400 border border-rose-500/40 px-2 py-0.5 rounded-full animate-pulse">
-                {sosCount} SOS
-              </span>
-            )}
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className="p-2 rounded-lg bg-zinc-800 text-zinc-300 hover:text-white"

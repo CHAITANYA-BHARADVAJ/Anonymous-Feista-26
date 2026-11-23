@@ -7,7 +7,6 @@ export default function AdminGame() {
   const [game, setGame] = useState<any>(null);
   const [teams, setTeams] = useState<any[]>([]);
   const [levels, setLevels] = useState<any[]>([]);
-  const [sos, setSos] = useState<any[]>([]);
   const [pendingPhotosCount, setPendingPhotosCount] = useState<number>(0);
   const [occupancyMatrix, setOccupancyMatrix] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -22,7 +21,7 @@ export default function AdminGame() {
 
   // Filter & Search
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<'all' | 'active' | 'finished' | 'final' | 'sos'>('all');
+  const [filter, setFilter] = useState<'all' | 'active' | 'finished' | 'final'>('all');
 
   // Broadcast Console state
   const [broadcastMsg, setBroadcastMsg] = useState('');
@@ -40,6 +39,46 @@ export default function AdminGame() {
   const [jumpTeam, setJumpTeam] = useState<any | null>(null);
   const [targetJumpStep, setTargetJumpStep] = useState<number>(1);
   const [confirmTeamAction, setConfirmTeamAction] = useState<{ type: 'advance' | 'finish'; team: any } | null>(null);
+
+  // Team Access Code Reset & Copy state
+  const [resetCodeTeam, setResetCodeTeam] = useState<any | null>(null);
+  const [newCodeInput, setNewCodeInput] = useState('');
+  const [isResettingCode, setIsResettingCode] = useState(false);
+  const [copiedTeamId, setCopiedTeamId] = useState<number | null>(null);
+
+  function handleCopyCode(teamId: number, code: string) {
+    if (!code) return;
+    navigator.clipboard.writeText(code);
+    setCopiedTeamId(teamId);
+    setTimeout(() => setCopiedTeamId(null), 2000);
+  }
+
+  function generateResetCode() {
+    const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
+    let code = '';
+    for (let i = 0; i < 6; i++) {
+      code += chars[Math.floor(Math.random() * chars.length)];
+    }
+    setNewCodeInput(code);
+  }
+
+  async function handleSaveNewCode(e: React.FormEvent) {
+    e.preventDefault();
+    if (!resetCodeTeam || !newCodeInput.trim()) return;
+
+    setIsResettingCode(true);
+    try {
+      const res = await api.resetTeamAccessCode(resetCodeTeam.id, newCodeInput.trim());
+      addLog(`🔑 Access code updated for ${resetCodeTeam.name} to "${res.displayCode}"`, 'warn');
+      setResetCodeTeam(null);
+      setNewCodeInput('');
+      await reload();
+    } catch (err: any) {
+      alert(err.message ?? 'Failed to update access code');
+    } finally {
+      setIsResettingCode(false);
+    }
+  }
 
   // Live Timer
   const [now, setNow] = useState(Date.now());
@@ -73,16 +112,6 @@ export default function AdminGame() {
     socket.on('game:status_changed', handleStatus);
     socket.on('game:status', handleStatus);
 
-    socket.on('sos:received', (alert: any) => {
-      setSos((prev) => [alert, ...prev.filter((s) => s.id !== alert.id)]);
-      addLog(`🚨 EMERGENCY SOS from ${alert.teamName ?? 'Team'}`, 'alert');
-    });
-
-    socket.on('sos:resolved', ({ id }: { id: number }) => {
-      setSos((prev) => prev.filter((s) => s.id !== id));
-      addLog(`✓ SOS Alert #${id} resolved`, 'info');
-    });
-
     socket.on('admin:photo_submitted', (data: any) => {
       setPendingPhotosCount((c) => c + 1);
       addLog(`📸 New verification photo submitted by ${data?.teamName ?? 'Team'}`, 'info');
@@ -109,8 +138,6 @@ export default function AdminGame() {
     return () => {
       socket.off('game:status_changed', handleStatus);
       socket.off('game:status', handleStatus);
-      socket.off('sos:received');
-      socket.off('sos:resolved');
       socket.off('admin:photo_submitted');
       socket.off('team:checkpoint_reached');
       socket.off('level:unlocked');
@@ -120,10 +147,9 @@ export default function AdminGame() {
 
   async function reload() {
     try {
-      const [games, teamsData, sosData, photosData] = await Promise.all([
+      const [games, teamsData, photosData] = await Promise.all([
         api.getGames().catch(() => []),
         api.getAdminTeams().catch(() => []),
-        api.getSosAlerts().catch(() => []),
         api.getAdminPhotos().catch(() => []),
       ]);
 
@@ -132,7 +158,6 @@ export default function AdminGame() {
         setGame(activeGame);
       }
       setTeams(teamsData || []);
-      setSos(sosData || []);
       setPendingPhotosCount((photosData || []).filter((p: any) => p.status === 'pending').length);
 
       if (activeGame) {
@@ -200,15 +225,6 @@ export default function AdminGame() {
       alert(err.message ?? 'Transmission failed');
     } finally {
       setIsBroadcasting(false);
-    }
-  }
-
-  async function handleResolveSos(sosId: number, teamName: string) {
-    try {
-      await api.resolveSos(sosId);
-      setSos((prev) => prev.filter((s) => s.id !== sosId));
-    } catch (err: any) {
-      alert(err.message ?? 'Failed to resolve alert');
     }
   }
 
@@ -308,15 +324,13 @@ export default function AdminGame() {
       const isFinished = Boolean(t.finishedAt);
       const currentLevelOrder = t.levelProgress?.[0]?.level?.orderIndex ?? 1;
       const isFinalLevel = levels.length > 0 && currentLevelOrder >= levels.length;
-      const hasSos = sos.some((s) => s.teamId === t.id);
 
       if (filter === 'active') return !isFinished;
       if (filter === 'finished') return isFinished;
       if (filter === 'final') return !isFinished && isFinalLevel;
-      if (filter === 'sos') return hasSos;
       return true;
     });
-  }, [teams, search, filter, levels, sos]);
+  }, [teams, search, filter, levels]);
 
   const stats = useMemo(() => {
     const total = teams.length;
@@ -465,17 +479,10 @@ export default function AdminGame() {
           <span className="text-2xl font-bold text-zinc-200 font-mono mt-1 tabular-nums">{stats.finished}</span>
         </div>
 
-        <div
-          onClick={() => setFilter(sos.length > 0 ? 'sos' : 'all')}
-          className={`cursor-pointer rounded-xl p-3.5 flex flex-col justify-between transition-all ${
-            sos.length > 0
-              ? 'bg-rose-950/60 border border-rose-500/70 text-rose-300'
-              : 'bg-zinc-900/60 border border-zinc-800/80 text-zinc-400'
-          }`}
-        >
-          <span className="text-[10px] font-mono uppercase">Emergency SOS</span>
-          <span className={`text-2xl font-bold font-mono mt-1 tabular-nums ${sos.length > 0 ? 'text-rose-400' : 'text-zinc-500'}`}>
-            {sos.length}
+        <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-xl p-3.5 flex flex-col justify-between">
+          <span className="text-[10px] font-mono text-zinc-400 uppercase">Total Squads</span>
+          <span className="text-2xl font-bold text-zinc-200 font-mono mt-1 tabular-nums">
+            {teams.length}
           </span>
         </div>
 
@@ -585,51 +592,6 @@ export default function AdminGame() {
         </div>
       </div>
 
-      {/* 3. EMERGENCY SOS FEED */}
-      {sos.length > 0 && (
-        <div className="bg-rose-950/30 border border-rose-500/40 rounded-2xl p-4 flex flex-col gap-2.5">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-mono font-bold text-rose-400 uppercase tracking-wide">
-              Active SOS Distress Calls ({sos.length})
-            </span>
-            <span className="text-[10px] font-mono text-zinc-400">Dispatch assistance immediately</span>
-          </div>
-
-          <div className="space-y-2">
-            {sos.map((alert) => (
-              <div
-                key={alert.id}
-                className="bg-zinc-950/80 rounded-xl p-3 border border-zinc-800 flex flex-wrap items-center justify-between gap-3 text-xs"
-              >
-                <div>
-                  <span className="font-bold text-white">{alert.team?.name ?? 'Unknown Team'}</span>
-                  <span className="text-zinc-400 font-mono ml-3">
-                    GPS: {alert.lat?.toFixed(5)}, {alert.lng?.toFixed(5)} • {new Date(alert.sentAt).toLocaleTimeString()}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <a
-                    href={`https://www.google.com/maps/search/?api=1&query=${alert.lat},${alert.lng}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="px-2.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-700 text-[11px] font-mono"
-                  >
-                    Maps 📍
-                  </a>
-                  <button
-                    onClick={() => handleResolveSos(alert.id, alert.team?.name)}
-                    className="px-3 py-1.5 rounded-lg bg-zinc-100 hover:bg-white text-zinc-950 font-semibold text-[11px]"
-                  >
-                    ✓ Acknowledge & Resolve
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* 4. TACTICAL RADIO TRANSMITTER */}
       <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-4 flex flex-col gap-3">
         <div className="flex items-center justify-between">
@@ -731,7 +693,6 @@ export default function AdminGame() {
               { id: 'active', label: `In Field (${stats.active})` },
               { id: 'final', label: `Finale (${stats.atFinale})` },
               { id: 'finished', label: `Finished (${stats.finished})` },
-              { id: 'sos', label: `SOS (${sos.length})` },
             ].map((f) => (
               <button
                 key={f.id}
@@ -753,7 +714,6 @@ export default function AdminGame() {
               const currentLevelOrder = team.levelProgress?.[0]?.level?.orderIndex ?? 1;
               const isFinished = Boolean(team.finishedAt);
               const isLoadingThis = actionLoadingTeamId === team.id;
-              const hasSos = sos.some((s) => s.teamId === team.id);
               const activeProgress = team.levelProgress?.[0];
               const reachedLocation = Boolean(activeProgress?.locationReachedAt);
               const penaltyMinutesTotal = team.penalties?.reduce((acc: number, p: any) => acc + (p.minutes || 0), 0) ?? 0;
@@ -762,9 +722,7 @@ export default function AdminGame() {
                 <div
                   key={team.id}
                   className={`p-3.5 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs ${
-                    hasSos
-                      ? 'bg-rose-950/20 border-rose-500/50'
-                      : isFinished
+                    isFinished
                       ? 'bg-emerald-950/15 border-emerald-500/30'
                       : 'bg-zinc-950/60 border-zinc-800/80'
                   }`}
@@ -781,6 +739,33 @@ export default function AdminGame() {
                           Stage {currentLevelOrder} {reachedLocation ? '(GPS ✓)' : ''}
                         </span>
                       )}
+                    </div>
+
+                    {/* Access code badge & copy/reset */}
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-[10px] text-zinc-400 font-mono">Code:</span>
+                      <span className="text-[11px] font-mono font-bold text-cyan-300 bg-cyan-950/60 px-1.5 py-0.5 rounded border border-cyan-500/30">
+                        {team.displayCode || '••••••'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyCode(team.id, team.displayCode || '')}
+                        className="text-[10px] text-zinc-400 hover:text-white px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 font-mono transition-all"
+                        title="Copy access code to clipboard"
+                      >
+                        {copiedTeamId === team.id ? '✓ Copied' : '📋 Copy'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setResetCodeTeam(team);
+                          setNewCodeInput('');
+                        }}
+                        className="text-[10px] text-cyan-400 hover:text-cyan-300 px-1.5 py-0.5 rounded bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/30 font-mono transition-all"
+                        title="Reset access code"
+                      >
+                        🔑 Reset
+                      </button>
                     </div>
 
                     {/* Progress indicators */}
@@ -1196,6 +1181,73 @@ export default function AdminGame() {
                 {confirmTeamAction.type === 'finish' ? 'Yes, Verify Finish' : 'Yes, Force Advance'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* RESET ACCESS CODE MODAL */}
+      {resetCodeTeam && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-sm w-full p-5 shadow-2xl flex flex-col gap-4">
+            <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
+              <div>
+                <h3 className="font-semibold text-white text-sm">Reset Access Code</h3>
+                <p className="text-xs text-cyan-400 font-mono">Squad: {resetCodeTeam.name}</p>
+              </div>
+              <button
+                onClick={() => setResetCodeTeam(null)}
+                className="w-7 h-7 rounded-lg bg-zinc-800 text-zinc-400 hover:text-white flex items-center justify-center font-mono text-xs"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveNewCode} className="space-y-4">
+              <div>
+                <label className="text-xs text-zinc-400 block mb-1">
+                  New Access Code (letters & numbers):
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newCodeInput}
+                    onChange={(e) => setNewCodeInput(e.target.value)}
+                    placeholder="e.g. cyber26"
+                    className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-xs font-mono text-white focus:outline-none focus:border-cyan-500 uppercase tracking-wider"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={generateResetCode}
+                    className="px-3 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-mono"
+                    title="Generate random password"
+                  >
+                    🎲 Gen
+                  </button>
+                </div>
+              </div>
+
+              <p className="text-[11px] text-zinc-500 font-mono leading-relaxed">
+                Saving this will immediately update the squad's password and terminate any active sessions on their phones.
+              </p>
+
+              <div className="pt-2 border-t border-zinc-800 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setResetCodeTeam(null)}
+                  className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isResettingCode || !newCodeInput.trim()}
+                  className="px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-all shadow-md disabled:opacity-50"
+                >
+                  {isResettingCode ? 'Updating…' : 'Update Access Code'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -64,6 +64,9 @@ export default function AdminLogin() {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               placeholder="admin"
               className="w-full px-4 py-3 rounded-xl bg-[#07080b] border border-white/10 text-white placeholder-gray-600 focus:outline-none focus:border-amber-400 text-sm font-medium transition-all"
             />
@@ -78,6 +81,9 @@ export default function AdminLogin() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               placeholder="••••••••"
               className="w-full px-4 py-3 rounded-xl bg-[#07080b] border border-white/10 text-white placeholder-gray-600 font-mono focus:outline-none focus:border-amber-400 text-sm font-medium transition-all"
             />

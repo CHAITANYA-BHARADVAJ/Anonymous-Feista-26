@@ -11,6 +11,7 @@ model Team {
   id        Int       @id @default(autoincrement())
   name      String    @unique
   code      String
+  displayCode String?
   leaderName String?
   mobile    String?
   finishedAt DateTime?

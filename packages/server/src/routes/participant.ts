@@ -250,25 +250,6 @@ router.post('/checkpoints/:id/claim', requireAuth('team'), async (req: AuthReque
   res.json({ rewardKind: cp.rewardKind, rewardValue: cp.rewardValue });
 });
 
-// SOS
-router.post('/sos', requireAuth('team'), async (req: AuthRequest, res) => {
-  const teamId = req.user!.sub;
-  const { lat, lng } = req.body as { lat: number; lng: number };
-
-  const alert = await prisma.sosAlert.create({ data: { teamId, lat, lng, sentAt: new Date() } });
-  const team = await prisma.team.findUnique({ where: { id: teamId } });
-
-  io.to('admin').emit('sos:received', {
-    teamId,
-    teamName: team?.name,
-    lat,
-    lng,
-    sentAt: alert.sentAt,
-  });
-
-  res.json({ ok: true });
-});
-
 // Upload verification photo
 router.post('/photos', requireAuth('team'), photoUpload.single('photo'), async (req: AuthRequest, res) => {
   const teamId = req.user!.sub;

@@ -31,7 +31,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   // Auth
   teamLogin: (name: string, code: string) =>
-    request<{ teamId: number; teamName: string }>('/auth/team/login', {
+    request<{ teamId: number; teamName: string; token?: string }>('/auth/team/login', {
       method: 'POST',
       body: JSON.stringify({ name, code }),
     }),
@@ -77,8 +77,6 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  sendSOS: (lat: number, lng: number) =>
-    request('/participant/sos', { method: 'POST', body: JSON.stringify({ lat, lng }) }),
 
   // Leaderboard (public)
   getLeaderboard: () => request<{ rankings: any[] }>('/leaderboard'),
@@ -86,8 +84,13 @@ export const api = {
 
   // Admin Operations & Emergency Failsafes
   getAdminTeams: () => request<any[]>('/admin/teams'),
-  createTeam: (name: string, code: string) =>
-    request<any>('/admin/teams', { method: 'POST', body: JSON.stringify({ name, code }) }),
+  createTeam: (name: string, code: string, leaderName?: string, mobile?: string) =>
+    request<any>('/admin/teams', { method: 'POST', body: JSON.stringify({ name, code, leaderName, mobile }) }),
+  resetTeamAccessCode: (teamId: number, code?: string) =>
+    request<{ ok: boolean; teamId: number; teamName: string; displayCode: string }>(
+      `/admin/teams/${teamId}/code`,
+      { method: 'PATCH', body: JSON.stringify({ code }) },
+    ),
   deleteTeam: (teamId: number) =>
     request<any>(`/admin/teams/${teamId}`, { method: 'DELETE' }),
   resetTeamProgress: (teamId: number) =>
@@ -104,7 +107,6 @@ export const api = {
     request<any>(`/admin/teams/${teamId}/force-unlock`, { method: 'POST' }),
   forceCompleteLevel: (teamId: number) =>
     request<any>(`/admin/teams/${teamId}/force-complete`, { method: 'POST' }),
-  getSosAlerts: () => request<any[]>('/admin/sos'),
   getGames: () => request<any[]>('/games'),
   patchGameStatus: (id: number | undefined, action: string) => {
     const url = id ? `/games/${id}/status` : '/games/status';
@@ -137,8 +139,6 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ minutes, note }),
     }),
-  resolveSos: (id: number) =>
-    request<any>(`/admin/sos/${id}/resolve`, { method: 'POST' }),
   getAdminPhotos: () => request<any[]>('/admin/photos'),
   reviewPhoto: (id: number, status: string, reviewNote?: string) =>
     request<any>(`/admin/photos/${id}`, {

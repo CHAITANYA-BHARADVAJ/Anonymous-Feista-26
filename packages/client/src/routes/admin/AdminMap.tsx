@@ -65,34 +65,28 @@ function getTeamColor(teamId: number): string {
 function createTeamMarkerIcon(
   teamName: string,
   teamId: number,
-  hasSos: boolean,
   isFinished: boolean,
   isSelected: boolean,
 ) {
-  const color = hasSos ? '#ef4444' : isFinished ? '#6ee7b7' : getTeamColor(teamId);
-  const glowClass = hasSos ? 'animate-ping' : '';
+  const color = isFinished ? '#6ee7b7' : getTeamColor(teamId);
 
   return L.divIcon({
     className: 'custom-admin-team-marker',
     html: `
       <div class="relative flex flex-col items-center justify-center transform -translate-x-1/2 -translate-y-1/2 cursor-pointer transition-transform hover:scale-110 select-none">
         ${
-          hasSos
-            ? `<div class="absolute -inset-2.5 rounded-full bg-rose-500/40 ${glowClass}"></div>`
-            : isSelected
+          isSelected
             ? `<div class="absolute -inset-2 rounded-full bg-cyan-400/30 animate-pulse"></div>`
             : ''
         }
         <div class="relative w-7 h-7 rounded-full flex items-center justify-center shadow-xl border-2 ${
-          hasSos
-            ? 'bg-rose-950 border-rose-500 text-rose-300'
-            : isFinished
+          isFinished
             ? 'bg-emerald-950 border-emerald-400 text-emerald-300'
             : isSelected
             ? 'bg-zinc-950 border-cyan-400 text-cyan-300 scale-110'
             : 'bg-zinc-950 border-zinc-700 text-white'
         }" style="border-color: ${color};">
-          <span class="text-[10px] font-mono font-black">${hasSos ? 'SOS' : '#' + teamId}</span>
+          <span class="text-[10px] font-mono font-black">#${teamId}</span>
         </div>
         <div class="mt-1 px-1.5 py-0.5 rounded-md bg-zinc-950/90 backdrop-blur-md border border-zinc-800 text-[10px] font-mono font-bold text-zinc-200 tracking-tight whitespace-nowrap shadow-md max-w-[110px] truncate" style="border-bottom: 2px solid ${color};">
           ${teamName}
@@ -129,14 +123,13 @@ export default function AdminMap() {
   const [teams, setTeams] = useState<any[]>([]);
   const [levels, setLevels] = useState<any[]>([]);
   const [zones, setZones] = useState<any[]>([]);
-  const [sosAlerts, setSosAlerts] = useState<any[]>([]);
   const [selectedSourceKey, setSelectedSourceKey] = useState<string>('google');
 
   // Focus and Selection
   const [selectedTeamId, setSelectedTeamId] = useState<number | null>(null);
   const [focusCoords, setFocusCoords] = useState<[number, number] | null>(null);
   const [fitBoundsCoords, setFitBoundsCoords] = useState<[number, number][] | null>(null);
-  const [filter, setFilter] = useState<'all' | 'active' | 'sos' | 'finished'>('all');
+  const [filter, setFilter] = useState<'all' | 'active' | 'finished'>('all');
   const [showRosterDrawer, setShowRosterDrawer] = useState<boolean>(true);
   const [search, setSearch] = useState<string>('');
 
@@ -173,15 +166,6 @@ export default function AdminMap() {
       },
     );
 
-    // SOS Alerts
-    socket.on('sos:received', (alert: any) => {
-      setSosAlerts((prev) => [alert, ...prev.filter((s) => s.id !== alert.id)]);
-    });
-
-    socket.on('sos:resolved', ({ id }: { id: number }) => {
-      setSosAlerts((prev) => prev.filter((s) => s.id !== id));
-    });
-
     // Checkpoint & Level changes
     socket.on('team:checkpoint_reached', () => reloadTeams());
     socket.on('level:unlocked', () => reloadTeams());
@@ -196,8 +180,6 @@ export default function AdminMap() {
 
     return () => {
       socket.off('admin:team_location');
-      socket.off('sos:received');
-      socket.off('sos:resolved');
       socket.off('team:checkpoint_reached');
       socket.off('level:unlocked');
       socket.off('winner:declared');
@@ -208,16 +190,14 @@ export default function AdminMap() {
 
   async function reloadAll() {
     try {
-      const [games, teamsData, sosData] = await Promise.all([
+      const [games, teamsData] = await Promise.all([
         api.getGames().catch(() => []),
         api.getAdminTeams().catch(() => []),
-        api.getSosAlerts().catch(() => []),
       ]);
 
       const activeGame = games[0] ?? null;
       setGame(activeGame);
       setTeams(teamsData);
-      setSosAlerts(sosData);
 
       // Populate initial locations from teamsData
       const initialLocs: Record<number, { lat: number; lng: number; recordedAt: string }> = {};
@@ -260,7 +240,6 @@ export default function AdminMap() {
       const lat = live?.lat ?? dbLoc?.lat ?? null;
       const lng = live?.lng ?? dbLoc?.lng ?? null;
       const recordedAt = live?.recordedAt ?? dbLoc?.recordedAt ?? null;
-      const hasSos = sosAlerts.some((s) => s.teamId === team.id);
       const isFinished = Boolean(team.finishedAt);
       const activeProgress = team.levelProgress?.find((p: any) => !p.completedAt);
       const completedCount = team.levelProgress?.filter((p: any) => p.completedAt).length ?? 0;
@@ -272,13 +251,12 @@ export default function AdminMap() {
         lng,
         recordedAt,
         hasLocation: lat != null && lng != null,
-        hasSos,
         isFinished,
         currentStep,
         activeLevelTitle: activeProgress?.level?.title ?? (isFinished ? 'Completed Hunt' : 'Waiting for Clue'),
       };
     });
-  }, [teams, liveLocations, sosAlerts]);
+  }, [teams, liveLocations]);
 
   // Filtered teams list
   const filteredTeams = useMemo(() => {
@@ -288,7 +266,6 @@ export default function AdminMap() {
         if (!matches) return false;
       }
       if (filter === 'active') return !t.isFinished;
-      if (filter === 'sos') return t.hasSos;
       if (filter === 'finished') return t.isFinished;
       return true;
     });
@@ -342,8 +319,6 @@ export default function AdminMap() {
     } catch {}
   }
 
-  const sosCount = sosAlerts.length;
-
   return (
     <div className="relative w-full h-[calc(100vh-4rem)] bg-zinc-950 text-zinc-100 flex overflow-hidden select-none">
       {/* =========================================================================
@@ -352,7 +327,7 @@ export default function AdminMap() {
       <div className="relative flex-1 h-full w-full">
         {/* Floating Top Controls Overlay */}
         <div className="absolute top-3 inset-x-3 z-[1000] flex items-center justify-between gap-2 pointer-events-none">
-          {/* Left: Summary Badge & SOS Banner */}
+          {/* Left: Summary Badge */}
           <div className="pointer-events-auto flex items-center gap-2">
             <div className="bg-zinc-950/90 backdrop-blur-xl border border-zinc-800 px-3.5 py-2 rounded-2xl shadow-2xl flex items-center gap-3">
               <div className="flex items-center gap-2">
@@ -416,13 +391,6 @@ export default function AdminMap() {
                     ▶ Resume
                   </button>
                 )}
-              </div>
-            )}
-
-            {sosCount > 0 && (
-              <div className="bg-rose-950/90 border border-rose-500/50 px-3 py-2 rounded-2xl text-xs font-mono text-rose-300 font-bold shadow-2xl flex items-center gap-2 animate-bounce">
-                <span>🚨</span>
-                <span>{sosCount} ACTIVE SOS DISTRESS CALL(S)</span>
               </div>
             )}
           </div>
@@ -586,14 +554,13 @@ export default function AdminMap() {
 
           {/* REAL-TIME TEAM MARKERS */}
           {mappedTeams.map((team) => {
-            const hasSos = team.hasSos;
             const isSelected = selectedTeamId === team.id;
 
             return (
               <Marker
                 key={`team-${team.id}`}
                 position={[team.lat, team.lng]}
-                icon={createTeamMarkerIcon(team.name, team.id, hasSos, team.isFinished, isSelected)}
+                icon={createTeamMarkerIcon(team.name, team.id, team.isFinished, isSelected)}
                 eventHandlers={{
                   click: () => setSelectedTeamId(team.id),
                 }}
@@ -604,11 +571,6 @@ export default function AdminMap() {
                       <span className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider">
                         SQUAD #{team.id}
                       </span>
-                      {hasSos && (
-                        <span className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-400 text-[10px] font-bold">
-                          SOS ACTIVE
-                        </span>
-                      )}
                       {team.isFinished && (
                         <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 text-[10px] font-bold">
                           FINISHED
@@ -621,6 +583,25 @@ export default function AdminMap() {
                       {team.leaderName && (
                         <p className="text-zinc-400 text-[11px]">Leader: {team.leaderName}</p>
                       )}
+                      <div className="flex items-center gap-1.5 mt-1 font-mono text-[11px]">
+                        <span className="text-zinc-400">Access Code:</span>
+                        <span className="font-bold text-cyan-300 bg-cyan-950/80 px-1.5 py-0.5 rounded border border-cyan-500/30">
+                          {team.displayCode || '••••••'}
+                        </span>
+                        {team.displayCode && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(team.displayCode);
+                              alert(`Copied access code "${team.displayCode}" to clipboard!`);
+                            }}
+                            className="text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-1.5 py-0.5 rounded transition-all"
+                            title="Copy access code"
+                          >
+                            📋 Copy
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     <div className="bg-zinc-900/80 rounded-lg p-2 border border-zinc-800 text-[11px] flex flex-col gap-1">
@@ -751,16 +732,6 @@ export default function AdminMap() {
               >
                 Racing
               </button>
-              {sosCount > 0 && (
-                <button
-                  onClick={() => setFilter('sos')}
-                  className={`flex-1 py-1 rounded-lg transition-all text-rose-400 ${
-                    filter === 'sos' ? 'bg-rose-950/60 border border-rose-500/40 font-bold' : 'hover:text-rose-300'
-                  }`}
-                >
-                  SOS ({sosCount})
-                </button>
-              )}
               <button
                 onClick={() => setFilter('finished')}
                 className={`flex-1 py-1 rounded-lg transition-all ${
@@ -797,9 +768,7 @@ export default function AdminMap() {
                     key={team.id}
                     onClick={() => handleSelectSquad(team)}
                     className={`p-3 rounded-2xl border text-xs font-mono cursor-pointer transition-all ${
-                      team.hasSos
-                        ? 'bg-rose-950/30 border-rose-500/40 hover:border-rose-400'
-                        : isSelected
+                      isSelected
                         ? 'bg-cyan-950/30 border-cyan-400 shadow-lg'
                         : 'bg-zinc-900/60 border-zinc-800/80 hover:border-zinc-700'
                     }`}
@@ -808,17 +777,13 @@ export default function AdminMap() {
                       <div className="flex items-center gap-2 truncate">
                         <span
                           className="w-2.5 h-2.5 rounded-full shrink-0"
-                          style={{ backgroundColor: team.hasSos ? '#ef4444' : getTeamColor(team.id) }}
+                          style={{ backgroundColor: getTeamColor(team.id) }}
                         />
                         <span className="font-bold text-white truncate">{team.name}</span>
                       </div>
 
                       <div className="flex items-center gap-1 shrink-0">
-                        {team.hasSos ? (
-                          <span className="text-[10px] bg-rose-500/20 text-rose-300 border border-rose-500/40 px-1.5 py-0.5 rounded font-bold animate-pulse">
-                            SOS
-                          </span>
-                        ) : team.isFinished ? (
+                        {team.isFinished ? (
                           <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-1.5 py-0.5 rounded font-bold">
                             FINISHED
                           </span>
@@ -831,10 +796,16 @@ export default function AdminMap() {
                     </div>
 
                     <div className="mt-2 text-[11px] text-zinc-400 flex items-center justify-between border-t border-white/5 pt-1.5">
-                      <span className="truncate max-w-[180px]">{team.activeLevelTitle}</span>
-                      <span className={hasLocation ? 'text-emerald-400 text-[10px]' : 'text-zinc-600 text-[10px]'}>
-                        {hasLocation ? '● GPS Online' : '○ No Signal'}
-                      </span>
+                      <span className="truncate max-w-[150px]">{team.activeLevelTitle}</span>
+                      <div className="flex items-center gap-1 font-mono text-[10px]">
+                        <span className="text-zinc-500">Code:</span>
+                        <span className="text-cyan-300 font-bold bg-cyan-950/70 px-1 py-0.5 rounded border border-cyan-500/30">
+                          {team.displayCode || '••••••'}
+                        </span>
+                        <span className={hasLocation ? 'text-emerald-400 text-[10px] ml-1' : 'text-zinc-600 text-[10px] ml-1'}>
+                          {hasLocation ? '●' : '○'}
+                        </span>
+                      </div>
                     </div>
 
                     {isSelected && !team.isFinished && (

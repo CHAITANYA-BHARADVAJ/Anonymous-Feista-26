@@ -22,7 +22,12 @@ router.get('/teams', requireAuth('admin'), async (_req, res) => {
 
 // Register a new team
 router.post('/teams', requireAuth('admin'), async (req, res) => {
-  const { name, code } = req.body as { name?: string; code?: string };
+  const { name, code, leaderName, mobile } = req.body as {
+    name?: string;
+    code?: string;
+    leaderName?: string;
+    mobile?: string;
+  };
   if (!name || !name.trim() || !code || !code.trim()) {
     res.status(400).json({ error: 'Team name and access code are required' });
     return;
@@ -42,6 +47,9 @@ router.post('/teams', requireAuth('admin'), async (req, res) => {
     data: {
       name: trimmedName,
       code: hashedCode,
+      displayCode: trimmedCode,
+      leaderName: leaderName?.trim() || null,
+      mobile: mobile?.trim() || null,
     },
   });
 
@@ -62,7 +70,58 @@ router.post('/teams', requireAuth('admin'), async (req, res) => {
     io.to(`game:${game.id}`).emit('leaderboard:updated', { rankings });
   }
 
-  res.status(201).json({ id: team.id, name: team.name, createdAt: team.createdAt });
+  res.status(201).json({ id: team.id, name: team.name, displayCode: team.displayCode, createdAt: team.createdAt });
+});
+
+// Update or reset access code for a team (in case a team forgets their code)
+router.patch('/teams/:id/code', requireAuth('admin'), async (req, res) => {
+  const teamId = Number(req.params.id);
+  const { code } = req.body as { code?: string };
+
+  const team = await prisma.team.findUnique({ where: { id: teamId } });
+  if (!team) {
+    res.status(404).json({ error: 'Team not found' });
+    return;
+  }
+
+  let newCode = code?.trim();
+  if (!newCode) {
+    // Generate clean 6-character alphanumeric code
+    const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
+    let rand = '';
+    for (let i = 0; i < 6; i++) {
+      rand += chars[Math.floor(Math.random() * chars.length)];
+    }
+    newCode = rand;
+  }
+
+  if (newCode.length < 3) {
+    res.status(400).json({ error: 'Access code must be at least 3 characters long' });
+    return;
+  }
+
+  const hashedCode = await bcrypt.hash(newCode, 10);
+
+  const updated = await prisma.team.update({
+    where: { id: teamId },
+    data: {
+      code: hashedCode,
+      displayCode: newCode,
+    },
+  });
+
+  // Revoke existing sessions so team logs in with new credentials
+  await prisma.teamSession.updateMany({
+    where: { teamId, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+
+  res.json({
+    ok: true,
+    teamId: updated.id,
+    teamName: updated.name,
+    displayCode: updated.displayCode,
+  });
 });
 
 // Delete a team
@@ -556,46 +615,12 @@ router.patch('/photos/:id', requireAuth('admin'), async (req, res) => {
   res.json(updated);
 });
 
-// List SOS alerts
-router.get('/sos', requireAuth('admin'), async (_req, res) => {
-  const alerts = await prisma.sosAlert.findMany({
-    include: { team: { select: { name: true } } },
-    orderBy: { sentAt: 'desc' },
-  });
-  res.json(alerts);
-});
-
-// Resolve / acknowledge an SOS alert
-router.post('/sos/:id/resolve', requireAuth('admin'), async (req, res) => {
-  const id = Number(req.params.id);
-  try {
-    await prisma.sosAlert.delete({ where: { id } });
-    io.to('admin').emit('sos:resolved', { id });
-    res.json({ ok: true, resolvedId: id });
-  } catch {
-    res.status(404).json({ error: 'Alert not found or already resolved' });
-  }
-});
-
-// Delete SOS alert (alias)
-router.delete('/sos/:id', requireAuth('admin'), async (req, res) => {
-  const id = Number(req.params.id);
-  try {
-    await prisma.sosAlert.delete({ where: { id } });
-    io.to('admin').emit('sos:resolved', { id });
-    res.json({ ok: true, resolvedId: id });
-  } catch {
-    res.status(404).json({ error: 'Alert not found or already resolved' });
-  }
-});
-
 // Quick aggregated game stats
 router.get('/stats', requireAuth('admin'), async (_req, res) => {
   const game = await prisma.game.findFirst({ orderBy: { id: 'desc' } });
-  const [totalTeams, finishedTeams, activeSos, pendingPhotos, totalPenalties] = await Promise.all([
+  const [totalTeams, finishedTeams, pendingPhotos, totalPenalties] = await Promise.all([
     prisma.team.count(),
     prisma.team.count({ where: { finishedAt: { not: null } } }),
-    prisma.sosAlert.count(),
     prisma.photo.count({ where: { status: 'pending' } }),
     prisma.penalty.count(),
   ]);
@@ -613,7 +638,6 @@ router.get('/stats', requireAuth('admin'), async (_req, res) => {
     totalTeams,
     finishedTeams,
     activeTeams: Math.max(0, totalTeams - finishedTeams),
-    activeSos,
     pendingPhotos,
     totalPenalties,
   });

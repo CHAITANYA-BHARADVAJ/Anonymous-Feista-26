@@ -216,4 +216,13 @@ docker compose run --rm app npx tsx /app/packages/server/prisma/seed.ts
   - **Bypass GPS (`POST /admin/teams/:id/bypass-gps`):** 1-click rescue for squads whose phone GPS jitters or fails to trigger geofence at physical landmarks. Instantly marks location reached, decrypts the clue on their screen via WebSocket (`clue:decrypted`), and displays decrypted intelligence. Available in both Command Desk and Live Field Radar popup.
   - **Force Advance (`POST /admin/teams/:id/force-advance`):** Forcibly marks active clue as solved by admin override and seamlessly dispatches the next clue along the squad's shuffled route.
   - **Direct Stage Jump (`POST /admin/teams/:id/jump-stage`):** Admin stage picker modal enabling coordinators to jump any squad directly to any specific stage (Stage 1 through Stage 10 Finale), resolving target paths automatically.
+- [x] Team Access Code Management & Field Reset:
+  - **Display Codes (`Team.displayCode`):** Plaintext credential visibility for coordinators across Admin Command Desk, Live Field Radar drawer, and Team Roster.
+  - **On-Demand Code Reset (`PATCH /admin/teams/:id/code`):** 1-click credential generator or custom password reset with automatic session invalidation (`TeamSession.revokedAt`).
+- [x] Resilient Mobile & Desktop Authentication:
+  - **Dual Password Support:** Accepts both original seeded codes (`hunt2026`, `fiesta26`) and updated codes (`alpha26`, `beta26`, etc.).
+  - **Case-Insensitive & Shorthand Matching:** Handles mobile auto-capitalization and matches call-signs with or without `Team ` prefix (e.g. `Alpha` ➔ `Team Alpha`).
+  - **Bearer Token & Cookie Persistence:** Robust dual authentication via JWT Authorization header and `ch_token` cookie, with automatic WebSocket re-authentication on login.
+- [x] Streamlined Participant & Admin HUD:
+  - Removed deprecated SOS feature across participant HUD, admin consoles, and backend APIs for simplified, clutter-free field operations.
 - [x] Docker multi-stage containerization, Caddy SSL automation, and EC2 documentation.

@@ -14,7 +14,7 @@ export function registerSocketHandlers(io: Server) {
     // Try auth token from handshake auth first, then fall back to cookie
     let token = socket.handshake.auth?.token as string | undefined;
     if (!token) {
-      token = parseCookie(socket.handshake.headers.cookie, 'ch_token');
+      token = parseCookie(socket.handshake.headers.cookie, 'ch_token') || parseCookie(socket.handshake.headers.cookie, 'token');
     }
     if (!token) {
       // Allow spectator connections without auth

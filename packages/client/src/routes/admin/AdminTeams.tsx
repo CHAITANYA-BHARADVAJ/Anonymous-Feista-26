@@ -21,9 +21,53 @@ export default function AdminTeams() {
   // Printable Cards Modal
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [recentCredentials, setRecentCredentials] = useState<Record<string, string>>({
-    'Team Alpha': 'hunt2026',
-    'Team Beta': 'fiesta26',
+    'Team Alpha': 'alpha26',
+    'Team Beta': 'beta26',
   });
+
+  // Reset Access Code Modal state
+  const [resetCodeTeam, setResetCodeTeam] = useState<any | null>(null);
+  const [newCodeInput, setNewCodeInput] = useState('');
+  const [isResettingCode, setIsResettingCode] = useState(false);
+  const [copiedTeamId, setCopiedTeamId] = useState<number | null>(null);
+
+  function handleCopyCode(teamId: number, code: string) {
+    if (!code) return;
+    navigator.clipboard.writeText(code);
+    setCopiedTeamId(teamId);
+    setTimeout(() => setCopiedTeamId(null), 2000);
+  }
+
+  function generateResetCode() {
+    const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
+    let code = '';
+    for (let i = 0; i < 6; i++) {
+      code += chars[Math.floor(Math.random() * chars.length)];
+    }
+    setNewCodeInput(code);
+  }
+
+  async function handleSaveNewCode(e: React.FormEvent) {
+    e.preventDefault();
+    if (!resetCodeTeam || !newCodeInput.trim()) return;
+
+    setIsResettingCode(true);
+    try {
+      const res = await api.resetTeamAccessCode(resetCodeTeam.id, newCodeInput.trim());
+      setTeams((prev) =>
+        prev.map((t) => (t.id === resetCodeTeam.id ? { ...t, displayCode: res.displayCode } : t)),
+      );
+      setRecentCredentials((prev) => ({ ...prev, [resetCodeTeam.name]: res.displayCode }));
+      alert(`Access code for "${resetCodeTeam.name}" has been updated to "${res.displayCode}".`);
+      setResetCodeTeam(null);
+      setNewCodeInput('');
+      await loadTeams();
+    } catch (err: any) {
+      alert(err.message ?? 'Failed to update access code');
+    } finally {
+      setIsResettingCode(false);
+    }
+  }
 
   useEffect(() => {
     loadTeams();
@@ -307,13 +351,13 @@ export default function AdminTeams() {
             {filtered.map((t) => {
               const currentProgress = t.levelProgress?.[0];
               const isFinished = Boolean(t.finishedAt);
-              const knownCode = recentCredentials[t.name] ?? '••••••';
+              const codeDisplay = t.displayCode || recentCredentials[t.name] || 'Not set';
               const penaltyMinutes = t.penalties?.reduce((acc: number, p: any) => acc + (p.minutes || 0), 0) ?? 0;
 
               return (
                 <div
                   key={t.id}
-                  className="bg-zinc-950/70 border border-zinc-800/80 rounded-xl p-3.5 flex flex-col justify-between gap-3"
+                  className="bg-zinc-950/70 border border-zinc-800/80 rounded-xl p-3.5 flex flex-col justify-between gap-3 shadow-md"
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div>
@@ -323,17 +367,39 @@ export default function AdminTeams() {
                           Leader: <strong className="text-zinc-200">{t.leaderName}</strong> {t.mobile ? `(${t.mobile})` : ''}
                         </p>
                       )}
-                      <p className="text-[11px] text-zinc-400 font-mono mt-0.5">
-                        Code: <strong className="text-zinc-200 font-mono">{knownCode}</strong>
-                      </p>
+                      <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                        <span className="text-[11px] text-zinc-400 font-mono">Code:</span>
+                        <span className="px-2 py-0.5 rounded bg-zinc-900 border border-zinc-700/80 text-amber-300 font-mono font-bold text-xs select-all">
+                          {codeDisplay}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyCode(t.id, codeDisplay)}
+                          className="text-[10px] text-zinc-400 hover:text-white px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 font-mono transition-all"
+                          title="Copy Access Code"
+                        >
+                          {copiedTeamId === t.id ? '✓ Copied' : '📋 Copy'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setResetCodeTeam(t);
+                            setNewCodeInput('');
+                          }}
+                          className="text-[10px] text-cyan-400 hover:text-cyan-300 px-1.5 py-0.5 rounded bg-cyan-950/60 border border-cyan-500/30 font-mono transition-all"
+                          title="Reset / Set new access code"
+                        >
+                          🔑 Reset
+                        </button>
+                      </div>
                     </div>
 
                     {isFinished ? (
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0">
                         FINISHED 🏁
                       </span>
                     ) : (
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-950/60 text-cyan-300 border border-cyan-500/30 font-bold">
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-950/60 text-cyan-300 border border-cyan-500/30 font-bold shrink-0">
                         {currentProgress ? `Step ${currentProgress.stepNumber ?? 1} / 10` : 'Standby'}
                       </span>
                     )}
@@ -353,6 +419,17 @@ export default function AdminTeams() {
                   </div>
 
                   <div className="flex items-center justify-end gap-1.5 pt-1 border-t border-zinc-800/60">
+                    <button
+                      onClick={() => {
+                        setResetCodeTeam(t);
+                        setNewCodeInput('');
+                      }}
+                      className="px-2.5 py-1 rounded-md bg-cyan-950/40 hover:bg-cyan-900/60 text-cyan-300 border border-cyan-500/30 text-[11px] font-mono flex items-center gap-1"
+                      title="Reset or change team access code"
+                    >
+                      <span>🔑</span>
+                      <span>Reset Code</span>
+                    </button>
                     <button
                       onClick={() => handleReset(t.id, t.name)}
                       className="px-2.5 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[11px] font-mono"
@@ -407,7 +484,7 @@ export default function AdminTeams() {
                   <div className="text-right">
                     <span className="text-[9px] text-zinc-500 block uppercase">Code</span>
                     <span className="text-sm font-bold text-zinc-100 bg-zinc-800 px-2.5 py-0.5 rounded border border-zinc-700">
-                      {recentCredentials[t.name] ?? 'hunt2026'}
+                      {t.displayCode || recentCredentials[t.name] || 'hunt2026'}
                     </span>
                   </div>
                 </div>
@@ -428,6 +505,73 @@ export default function AdminTeams() {
                 Close
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Team Access Code Modal */}
+      {resetCodeTeam && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-sm w-full p-5 shadow-2xl flex flex-col gap-4">
+            <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
+              <div>
+                <h3 className="font-semibold text-white text-sm">Reset Access Code</h3>
+                <p className="text-xs text-cyan-400 font-mono">Squad: {resetCodeTeam.name}</p>
+              </div>
+              <button
+                onClick={() => setResetCodeTeam(null)}
+                className="w-7 h-7 rounded-lg bg-zinc-800 text-zinc-400 hover:text-white flex items-center justify-center font-mono text-xs"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveNewCode} className="space-y-4">
+              <div>
+                <label className="text-xs text-zinc-400 block mb-1">
+                  New Access Code (letters & numbers):
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newCodeInput}
+                    onChange={(e) => setNewCodeInput(e.target.value)}
+                    placeholder="e.g. cyber26"
+                    className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-xs font-mono text-white focus:outline-none focus:border-cyan-500 uppercase tracking-wider"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={generateResetCode}
+                    className="px-3 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-mono"
+                    title="Generate random password"
+                  >
+                    🎲 Gen
+                  </button>
+                </div>
+              </div>
+
+              <p className="text-[11px] text-zinc-500 font-mono leading-relaxed">
+                Saving this will immediately update the squad's password and terminate any active sessions on their phones.
+              </p>
+
+              <div className="pt-2 border-t border-zinc-800 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setResetCodeTeam(null)}
+                  className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isResettingCode || !newCodeInput.trim()}
+                  className="px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-all shadow-md disabled:opacity-50"
+                >
+                  {isResettingCode ? 'Updating…' : 'Update Access Code'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
