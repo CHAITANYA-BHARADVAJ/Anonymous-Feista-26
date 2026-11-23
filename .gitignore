@@ -10,3 +10,4 @@ packages/server/prisma/dev.db*
 packages/server/uploads/
 packages/client/.vite/
 *.tsbuildinfo
+*.pdf
