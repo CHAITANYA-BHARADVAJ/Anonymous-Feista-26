@@ -1,9 +1,9 @@
 # 🎯 PROJECT_STATE — Campus Hunt SDMCET (Anonymous-Feista-26)
 
 > **Auto-Maintained Operational Master File**  
-> **Last Updated:** November 24, 2026, 00:55 IST  
-> **Active Branch:** `feat/initial-implementation` & `main`  
-> **Latest Commit:** [`1bc0dfe`](https://github.com/CHAITANYA-BHARADVAJ/Anonymous-Feista-26/commit/1bc0dfe) (Committed locally on feat/initial-implementation, awaiting push permission)  
+> **Last Updated:** November 25, 2026, 00:58 IST  
+> **Active Branch:** `main` & `feat/initial-implementation` (synced)  
+> **Latest Code Commit:** [`8f0584f`](https://github.com/CHAITANYA-BHARADVAJ/Anonymous-Feista-26/commit/8f0584f) (Full Obsidian UI/UX polish, dead-file cleanup & male PA voice module)  
 > **Live Production URL:** [https://13.126.101.127.nip.io/](https://13.126.101.127.nip.io/)  
 > **Public IP:** `13.126.101.127`  
 > **Repository:** [https://github.com/CHAITANYA-BHARADVAJ/Anonymous-Feista-26](https://github.com/CHAITANYA-BHARADVAJ/Anonymous-Feista-26)  
@@ -81,6 +81,9 @@
 | **Leaderboard Caching** | In-memory 2-second RAM cache with instant mutation invalidation | 100+ concurrent spectators/players served in **<1ms**; cuts database queries by 95%. |
 | **GPS Breadcrumb Throttling** | Real-time WebSocket radar broadcast with 12s SQLite write throttle | Live admin tracking stays 0ms instant while disk I/O is reduced by 85%. |
 | **Docker Build Footprint** | Removed `g++`/`python3`/`make`; pruned cache | Resolved `ENOSPC` disk errors on small 8GB AWS EC2 instances. |
+| **In-App Feedback Layer** | Unified `uiStore` + `FeedbackOverlay` toasts & Escape-dismissible confirms | Zero blocking browser `alert()`/`confirm()` popups across participant and admin portals. |
+| **Arena PA Voice System** | Web Audio synthesis (`sound.ts`) + male `SpeechSynthesis` announcer (`voice.ts`, `PaVoiceBanner.tsx`) | Calm squad login briefing, energetic kickoff instructions, mute/replay controls, and live caption banner. |
+| **Dev/Prod Asset Isolation** | `clientDist` static guard (`npm_lifecycle_event !== 'dev'`) in `packages/server/src/index.ts` | Prevents stale `dist/` UI bundles from shadowing Vite (`:5173`) during development. |
 
 ---
 
@@ -193,11 +196,37 @@ Via: 1.1 Caddy
 
 ---
 
-## 📜 8. Chronological Update & Changelog History
+## 🧪 8. Automated Verification & Test Suite (`npm test`)
 
-* **Nov 24, 2026:** Comprehensive release delivering 6 user-requested operational updates:
+Executed via `tests/run_all_tests.ts` with pre-flight and post-flight database sanitization (`purgeTestSquads()`) so test runs leave zero temporary squads behind:
+
+| Suite | File | Coverage |
+| :--- | :--- | :--- |
+| **Suite 1** | `tests/01_static_and_db.ts` | Static analysis, TypeScript types & SQLite/Prisma DB integrity |
+| **Suite 2** | `tests/02_api_and_security.ts` | Full REST API endpoint coverage & auth/RBAC security matrix |
+| **Suite 3** | `tests/03_gameplay_flow.ts` | End-to-end participant field gameplay progression |
+| **Suite 4** | `tests/04_realtime_sockets.ts` | Real-time Socket.io telemetry, kickoff & alert events |
+| **Suite 5** | `tests/05_concurrency_25_teams.ts` | 25-squad concurrent registration & gameplay stress test |
+
+**Saved Local DB Snapshot (`packages/server/prisma/dev.db` — WAL checkpointed cleanly, 0-byte WAL):**
+- **Game:** `Campus Hunt 2026 - SDMCET` (ID `1`, status `idle`)
+- **Teams (4):** `Team Alpha`, `Team Beta`, `Cyber Phantoms`, `Titan` (0 leftover test squads)
+- **Configured Data:** `16` levels, `4` geofence zones
+
+---
+
+## 📜 9. Chronological Update & Changelog History
+
+* **Nov 25, 2026 (Commit `8f0584f`):** Full Obsidian UI/UX overhaul, dead-file cleanup, and male PA voice announcements:
+  1. **Squid Game Male PA Voice Module:** Added [`voice.ts`](packages/client/src/lib/voice.ts), [`voiceStore.ts`](packages/client/src/stores/voiceStore.ts), [`PaVoiceBanner.tsx`](packages/client/src/components/PaVoiceBanner.tsx), and synthesized chimes/fanfare (`playPaChime`, `playKickoffFanfare`) in [`sound.ts`](packages/client/src/lib/sound.ts). Delivers a calm arena welcome & field-safety briefing upon login (`announceArenaWelcome`), an energetic fanfare with step-by-step plain-language instructions upon game kickoff (`announceGameStarted`), gesture speech priming (`primeSpeechEngine`) with an interactive autoplay banner fallback, and HUD mute/replay controls.
+  2. **Unified Obsidian UI & Feedback System:** Consolidated CSS surface tokens (`.obsidian-surface`), `100dvh` mobile-safe layout containers, reduced-motion media rules (`prefers-reduced-motion`), and custom inline SVG icons (`Icons.tsx`). Added [`uiStore.ts`](packages/client/src/stores/uiStore.ts) and [`FeedbackOverlay.tsx`](packages/client/src/components/FeedbackOverlay.tsx) to replace blocking native browser dialogs (`alert()`/`confirm()`/`prompt()`) across participant, auth, spectator, and admin portals.
+  3. **HUD & Map Polish:** Elevated `<ZoneWarning />` overlay z-index to `z-[2000]` above map layers, added radar sweep reticle (`DistanceRadar.tsx`), docked HUD panels cleanly, added password show/hide toggles on auth forms, and added a verified finish celebration card in `PlayDashboard.tsx`.
+  4. **Dev Runtime Isolation & Cleanup:** Removed stale build outputs (`dist/`, `.vite/`) and unused `cluePoolDefaults.ts`, and guarded static `clientDist` serving in `packages/server/src/index.ts` (`process.env.npm_lifecycle_event !== 'dev'`) so `npm run dev` serves Vite (`:5173`) cleanly without stale bundle conflicts.
+* **Nov 24, 2026 (Commit `b73edb5`):** Admin suite polish pass (`AdminGame`, `AdminLeaderboard`, `AdminMap`, `AdminPhotos`, `AdminTeams`) and zero-trace test sanitization (`purgeTestSquads()` in `tests/run_all_tests.ts`).
+* **Nov 24, 2026 (Commit `7d662ec`):** UI simplification across admin workbench routes and creation of the 5-tier Master Test Suite (`tests/01`–`05` + `run_all_tests.ts`).
+* **Nov 24, 2026 (Commit `d0b17df`):** Comprehensive release delivering 6 user-requested operational updates:
   1. **Broadcast Transmission Fix:** Repositioned `<AnnouncementBanner />` as an elevated fixed overlay (`z-[1300]`) with cyber-card design, audio ping, and 15s auto-dismiss; expanded Socket.io emission to global and room channels.
-  2. **Clue Pool Studio (Master Library):** Added dedicated 'Clue Pool Studio' tab in AdminLevels backed by a 26-landmark SDMCET master bank (`cluePoolDefaults.ts`), search/filter, multi-select checkboxes, custom clue editor, and 1-click `deploy-pool` transactional backend endpoint.
+  2. **Clue Pool Studio (Master Library):** Added dedicated 'Clue Pool Studio' tab in `AdminLevels.tsx` with search/filter, multi-select checkboxes, custom clue editor, and 1-click `deploy-pool` backend endpoint (`packages/server/src/routes/levels.ts`).
   3. **Participant GPS Recalibration:** Built `<GpsCalibrationModal />` featuring live accuracy meter (±meters), colored status bar, satellite fix readouts, compass figure-8 sensor reset guide, and "Force Recalibrate" button directly in the Top HUD.
   4. **Inline Social Media QR Generator:** Built zero-latency offline SVG QR generator (`QrCodeDisplay.tsx` via `@zxing/library`) with tap-to-enlarge modal so teammates can instantly scan social media links (Instagram, YouTube, Drive) on a secondary phone.
   5. **Camera Punch-Hole Safe HUD:** Relocated the top-center mission stopwatch to the Top-Right cluster, leaving the center safe zone completely clear of selfie camera notches/holes.
