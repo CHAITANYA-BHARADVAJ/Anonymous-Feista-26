@@ -9,10 +9,12 @@ export default function AdminGame() {
   const [levels, setLevels] = useState<any[]>([]);
   const [pendingPhotosCount, setPendingPhotosCount] = useState<number>(0);
   const [occupancyMatrix, setOccupancyMatrix] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
   const [actionRunning, setActionRunning] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<'end' | 'reset' | null>(null);
   const [actionLoadingTeamId, setActionLoadingTeamId] = useState<number | null>(null);
+
+  // Active contextual menu dropdown
+  const [openMenuTeamId, setOpenMenuTeamId] = useState<number | null>(null);
 
   // Live Activity Log
   const [activityLogs, setActivityLogs] = useState<
@@ -35,7 +37,7 @@ export default function AdminGame() {
   const [penaltyMinutes, setPenaltyMinutes] = useState<number>(5);
   const [penaltyReason, setPenaltyReason] = useState('Rule violation');
 
-  // Emergency Level Override & Stage Jump state
+  // Emergency Stage Jump state
   const [jumpTeam, setJumpTeam] = useState<any | null>(null);
   const [targetJumpStep, setTargetJumpStep] = useState<number>(1);
   const [confirmTeamAction, setConfirmTeamAction] = useState<{ type: 'advance' | 'finish'; team: any } | null>(null);
@@ -105,7 +107,7 @@ export default function AdminGame() {
     const handleStatus = (data: any) => {
       const statusData = data.game || data;
       setGame((g: any) => (g ? { ...g, ...statusData } : statusData));
-      addLog(`Event status changed to: ${(statusData.status || '').toUpperCase()}`, 'info');
+      addLog(`Status changed to: ${(statusData.status || '').toUpperCase()}`, 'info');
       reload();
     };
 
@@ -122,7 +124,7 @@ export default function AdminGame() {
     });
 
     socket.on('team:checkpoint_reached', (data: any) => {
-      addLog(`📍 ${data.teamName} reached GPS target for ${data.levelTitle}`, 'success');
+      addLog(`📍 ${data.teamName} reached target for ${data.levelTitle}`, 'success');
       reload();
     });
 
@@ -175,17 +177,15 @@ export default function AdminGame() {
     setActionRunning(action);
     setConfirmAction(null);
     try {
-      addLog(`Transmitting game directive: ${action.toUpperCase()}...`, 'info');
       const updated: any = await api.patchGameStatus(game?.id, action);
       if (updated) {
         setGame((g: any) => ({ ...(g || {}), ...updated }));
-        addLog(`Directive applied successfully: ${(updated.status || action).toUpperCase()}`, 'success');
+        addLog(`Directive applied: ${(updated.status || action).toUpperCase()}`, 'success');
       }
       await reload();
     } catch (err: any) {
-      console.error('Game action failed:', err);
       addLog(`Action failed (${action}): ${err.message}`, 'alert');
-      alert(`Game Action Failed: ${err.message ?? 'Unknown error'}`);
+      alert(`Action Failed: ${err.message ?? 'Unknown error'}`);
     } finally {
       setActionRunning(null);
     }
@@ -249,7 +249,6 @@ export default function AdminGame() {
       addLog(`🔓 GPS bypassed for ${teamName}: ${res.levelTitle ?? 'Clue'} decrypted!`, 'success');
       await reload();
     } catch (err: any) {
-      console.error('Bypass GPS failed:', err);
       alert(err.message ?? 'Could not bypass GPS check');
     } finally {
       setActionLoadingTeamId(null);
@@ -260,10 +259,9 @@ export default function AdminGame() {
     setActionLoadingTeamId(teamId);
     try {
       const res = await api.forceAdvanceTeam(teamId);
-      addLog(`⏩ Force advanced ${teamName} to Stage ${res.nextStepNumber ?? 'Next'}`, 'warn');
+      addLog(`⏩ Advanced ${teamName} to Stage ${res.nextStepNumber ?? 'Next'}`, 'warn');
       await reload();
     } catch (err: any) {
-      console.error('Force advance failed:', err);
       alert(err.message ?? 'Could not advance level');
     } finally {
       setActionLoadingTeamId(null);
@@ -276,7 +274,7 @@ export default function AdminGame() {
     setActionLoadingTeamId(jumpTeam.id);
     try {
       await api.jumpTeamStage(jumpTeam.id, targetJumpStep);
-      addLog(`🔀 Emergency override: moved ${jumpTeam.name} directly to Stage ${targetJumpStep}`, 'warn');
+      addLog(`🔀 Moved ${jumpTeam.name} to Stage ${targetJumpStep}`, 'warn');
       setJumpTeam(null);
       await reload();
     } catch (err: any) {
@@ -345,20 +343,18 @@ export default function AdminGame() {
 
   return (
     <div className="p-4 md:p-6 flex flex-col gap-5 max-w-7xl mx-auto pb-24 font-sans text-zinc-100">
-      {/* 1. TOP MISSION BANNER */}
-      <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+      {/* 1. TOP COMMAND BAR */}
+      <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-4 md:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4 shadow-xl">
         <div>
           <div className="flex flex-wrap items-center gap-2.5">
             <h2 className="text-xl font-bold tracking-tight text-white">{game?.name ?? 'SDMCET Campus Hunt'}</h2>
             {game && (
               <span
-                className={`px-2.5 py-0.5 rounded-md text-[11px] font-mono font-semibold uppercase tracking-wide border ${
+                className={`px-2.5 py-0.5 rounded-md text-[11px] font-mono font-bold uppercase tracking-wide border ${
                   game.status === 'running'
                     ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
                     : game.status === 'paused'
                     ? 'bg-amber-500/10 text-amber-300 border-amber-500/30'
-                    : game.status === 'ended'
-                    ? 'bg-zinc-800 text-zinc-400 border-zinc-700'
                     : 'bg-zinc-800 text-zinc-400 border-zinc-700'
                 }`}
               >
@@ -366,20 +362,18 @@ export default function AdminGame() {
               </span>
             )}
           </div>
-          <p className="text-xs text-zinc-400 mt-1 font-mono">
-            OPERATIONAL COMMAND • GEOFENCING ACTIVE • SDMCET CAMPUS
+          <p className="text-xs text-zinc-400 mt-0.5 font-mono">
+            Campus Hunt Command Desk • SDMCET Dharwad
           </p>
         </div>
 
-        {/* Master Clock & Controls */}
+        {/* Master Controls */}
         <div className="flex flex-wrap items-center gap-3">
-          <div className="bg-zinc-950 px-3.5 py-2 rounded-xl border border-zinc-800/80 flex items-center gap-3">
-            <span className="text-[10px] font-mono text-zinc-500 uppercase">Elapsed</span>
-            <span className="text-xl font-mono font-bold text-zinc-100 tabular-nums">
+          {/* Stopwatch */}
+          <div className="bg-zinc-950 px-3.5 py-2 rounded-xl border border-zinc-800 flex items-center gap-2.5">
+            <span className="text-[10px] font-mono text-zinc-500 uppercase">Elapsed:</span>
+            <span className="text-lg font-mono font-bold text-zinc-100 tabular-nums">
               {elapsedFormatted}
-            </span>
-            <span className="text-[9px] font-mono text-zinc-500 border-l border-zinc-800 pl-2.5">
-              Target: 60m
             </span>
           </div>
 
@@ -388,7 +382,7 @@ export default function AdminGame() {
               <button
                 onClick={() => executeGameAction('start')}
                 disabled={Boolean(actionRunning)}
-                className="px-4 py-2 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 font-semibold text-xs transition-all min-h-[38px] flex items-center gap-1.5 shadow-md shadow-white/5"
+                className="px-4 py-2 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 font-bold text-xs transition-all flex items-center gap-1.5 shadow"
               >
                 {actionRunning === 'start' ? 'Starting…' : 'Start Event'}
               </button>
@@ -398,10 +392,10 @@ export default function AdminGame() {
               <button
                 onClick={() => executeGameAction('pause')}
                 disabled={Boolean(actionRunning)}
-                className="px-3.5 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-semibold text-xs border border-amber-500/50 transition-all min-h-[38px] flex items-center gap-1.5 shadow-lg shadow-amber-950/40"
+                className="px-3 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-xs border border-amber-500/40 transition-all flex items-center gap-1.5"
               >
                 <span>⏸</span>
-                <span>{actionRunning === 'pause' ? 'Pausing…' : 'Pause Timers'}</span>
+                <span>Pause</span>
               </button>
             )}
 
@@ -409,10 +403,10 @@ export default function AdminGame() {
               <button
                 onClick={() => executeGameAction('resume')}
                 disabled={Boolean(actionRunning)}
-                className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-xs transition-all min-h-[38px] flex items-center gap-1.5 shadow-lg shadow-emerald-950/40"
+                className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-xs transition-all flex items-center gap-1.5 shadow"
               >
                 <span>▶</span>
-                <span>{actionRunning === 'resume' ? 'Resuming…' : 'Resume Timers'}</span>
+                <span>Resume</span>
               </button>
             )}
 
@@ -420,10 +414,10 @@ export default function AdminGame() {
               <button
                 onClick={() => setConfirmAction('end')}
                 disabled={Boolean(actionRunning)}
-                className="px-3.5 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 font-bold text-xs border border-rose-700/60 transition-all min-h-[38px] flex items-center gap-1.5 shadow-lg shadow-rose-950/50"
+                className="px-3 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 font-bold text-xs border border-rose-700/60 transition-all flex items-center gap-1"
               >
                 <span>⏹</span>
-                <span>{actionRunning === 'end' ? 'Ending…' : 'End Event'}</span>
+                <span>End</span>
               </button>
             )}
 
@@ -431,16 +425,16 @@ export default function AdminGame() {
               <button
                 onClick={() => executeGameAction('start')}
                 disabled={Boolean(actionRunning)}
-                className="px-4 py-2 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 font-semibold text-xs transition-all min-h-[38px] flex items-center gap-1.5"
+                className="px-4 py-2 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 font-bold text-xs transition-all"
               >
-                {actionRunning === 'start' ? 'Launching…' : 'Relaunch'}
+                Relaunch
               </button>
             )}
 
             <button
               onClick={() => setConfirmAction('reset')}
               disabled={Boolean(actionRunning)}
-              className="px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 text-xs font-mono border border-zinc-800 transition-all min-h-[38px]"
+              className="px-2.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 text-xs font-mono border border-zinc-800 transition-all"
               title="Reset game state"
             >
               Reset
@@ -448,170 +442,101 @@ export default function AdminGame() {
 
             <NavLink
               to="/admin/map"
-              className="px-3.5 py-2 rounded-xl bg-cyan-950/60 hover:bg-cyan-900/80 text-cyan-300 font-semibold text-xs border border-cyan-500/40 transition-all min-h-[38px] flex items-center gap-1.5 shadow-lg shadow-cyan-950/50"
+              className="px-3.5 py-2 rounded-xl bg-cyan-950/60 hover:bg-cyan-900/80 text-cyan-300 font-bold text-xs border border-cyan-500/40 transition-all flex items-center gap-1.5"
             >
-              <span>🗺️</span>
-              <span>Live Field Radar →</span>
+              <span>Field Radar →</span>
             </NavLink>
           </div>
         </div>
       </div>
 
-      {/* 2. OPERATIONAL KPI METRIC TILES */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-xl p-3.5 flex flex-col justify-between">
-          <span className="text-[10px] font-mono text-zinc-400 uppercase">Teams Enrolled</span>
-          <span className="text-2xl font-bold text-zinc-100 font-mono mt-1 tabular-nums">{stats.total}</span>
-        </div>
-
-        <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-xl p-3.5 flex flex-col justify-between">
-          <span className="text-[10px] font-mono text-emerald-400 uppercase">In Field</span>
+      {/* 2. CONSOLIDATED KPI TILES */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-3.5 flex flex-col justify-between">
+          <span className="text-[10px] font-mono text-zinc-400 uppercase">Active in Field</span>
           <span className="text-2xl font-bold text-emerald-400 font-mono mt-1 tabular-nums">{stats.active}</span>
         </div>
 
-        <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-xl p-3.5 flex flex-col justify-between">
-          <span className="text-[10px] font-mono text-zinc-300 uppercase">At Finale</span>
-          <span className="text-2xl font-bold text-zinc-200 font-mono mt-1 tabular-nums">{stats.atFinale}</span>
+        <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-3.5 flex flex-col justify-between">
+          <span className="text-[10px] font-mono text-zinc-400 uppercase">At Finale Sprint</span>
+          <span className="text-2xl font-bold text-purple-300 font-mono mt-1 tabular-nums">{stats.atFinale}</span>
         </div>
 
-        <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-xl p-3.5 flex flex-col justify-between">
+        <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-3.5 flex flex-col justify-between">
           <span className="text-[10px] font-mono text-zinc-400 uppercase">Verified Finished</span>
-          <span className="text-2xl font-bold text-zinc-200 font-mono mt-1 tabular-nums">{stats.finished}</span>
-        </div>
-
-        <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-xl p-3.5 flex flex-col justify-between">
-          <span className="text-[10px] font-mono text-zinc-400 uppercase">Total Squads</span>
-          <span className="text-2xl font-bold text-zinc-200 font-mono mt-1 tabular-nums">
-            {teams.length}
-          </span>
+          <span className="text-2xl font-bold text-zinc-100 font-mono mt-1 tabular-nums">{stats.finished}</span>
         </div>
 
         <NavLink
           to="/admin/photos"
-          className={`rounded-xl p-3.5 flex flex-col justify-between transition-all ${
+          className={`rounded-2xl p-3.5 flex flex-col justify-between transition-all ${
             pendingPhotosCount > 0
               ? 'bg-amber-950/40 border border-amber-500/60 text-amber-300'
               : 'bg-zinc-900/60 border border-zinc-800/80 text-zinc-400'
           }`}
         >
-          <span className="text-[10px] font-mono uppercase">Photos to Review</span>
+          <span className="text-[10px] font-mono uppercase">Photo Queue</span>
           <div className="flex items-baseline justify-between mt-1">
             <span className={`text-2xl font-bold font-mono tabular-nums ${pendingPhotosCount > 0 ? 'text-amber-300' : 'text-zinc-500'}`}>
               {pendingPhotosCount}
             </span>
-            <span className="text-[10px] font-mono text-zinc-500 underline">queue →</span>
+            <span className="text-[10px] font-mono text-zinc-500 underline">review →</span>
           </div>
         </NavLink>
       </div>
 
-      {/* 2.5. CONFLICT-FREE LANDMARK OCCUPANCY MATRIX */}
-      <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-5 flex flex-col gap-4 shadow-xl">
-        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-zinc-800">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-base font-bold text-white flex items-center gap-2">
-                <span>🛡️</span>
-                <span>Campus Landmark Occupancy Monitor</span>
-              </span>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 font-bold">
-                DISTRIBUTED PATHS
-              </span>
-            </div>
-            <p className="text-xs text-zinc-400 mt-0.5 font-mono">
-              Real-time station occupancy: 9 intermediate landmarks per squad + Grand Finale.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2 text-xs font-mono">
-            <span className="px-2.5 py-1 rounded-lg bg-zinc-950 border border-zinc-800 text-zinc-300">
-              Total Stations: <strong className="text-white">{occupancyMatrix.length}</strong>
-            </span>
-            <span className="px-2.5 py-1 rounded-lg bg-emerald-950/40 border border-emerald-500/30 text-emerald-300">
-              Free: <strong className="text-emerald-400">{occupancyMatrix.filter((m) => !m.isOccupied).length}</strong>
-            </span>
-            <span className="px-2.5 py-1 rounded-lg bg-amber-950/40 border border-amber-500/30 text-amber-300">
-              Occupied: <strong className="text-amber-400">{occupancyMatrix.filter((m) => m.isOccupied).length}</strong>
+      {/* 3. COMPACT LANDMARK OCCUPANCY MATRIX */}
+      {occupancyMatrix.length > 0 && (
+        <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-4 flex flex-col gap-3 shadow-xl">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-zinc-200">
+              Landmark Occupancy ({occupancyMatrix.filter((m) => m.isOccupied).length} Active / {occupancyMatrix.length} Stations)
             </span>
           </div>
-        </div>
 
-        {/* Occupancy Station Tiles */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 max-h-72 overflow-y-auto pr-1">
-          {occupancyMatrix.map((station) => {
-            const isOccupied = station.isOccupied;
-            const occupants: any[] = station.activeOccupants ?? [];
+          <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto pr-1">
+            {occupancyMatrix.map((station) => {
+              const isOccupied = station.isOccupied;
+              const occupants: any[] = station.activeOccupants ?? [];
 
-            return (
-              <div
-                key={station.levelId}
-                className={`p-3 rounded-xl border text-xs font-mono transition-all flex flex-col justify-between gap-2 ${
-                  station.isFinal
-                    ? 'bg-purple-950/20 border-purple-500/40 text-purple-200'
-                    : isOccupied
-                    ? 'bg-amber-950/20 border-amber-500/40 text-amber-200 shadow-sm'
-                    : 'bg-zinc-950/60 border-zinc-800/80 text-zinc-400'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-1">
-                  <div className="flex items-center gap-1.5 truncate">
-                    <span className="text-[10px] text-zinc-500 shrink-0">#{station.orderIndex}</span>
-                    <span className="font-bold text-white truncate text-[11px]">{station.title}</span>
-                  </div>
-                  {station.isFinal ? (
-                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 font-bold shrink-0">
-                      FINALE
-                    </span>
-                  ) : occupants.length > 1 ? (
-                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/30 text-amber-300 font-bold shrink-0">
-                      {occupants.length} SQUADS
-                    </span>
-                  ) : null}
-                </div>
-
-                <div className="flex flex-col gap-1 text-[11px] pt-1 border-t border-white/5">
-                  {isOccupied && occupants.length > 0 ? (
-                    occupants.map((occ: any, oIdx: number) => (
-                      <div key={oIdx} className="flex items-center justify-between text-amber-300">
-                        <div className="flex items-center gap-1.5 truncate">
-                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
-                          <span className="font-bold truncate text-[11px]">{occ.teamName}</span>
-                        </div>
-                        <span className="text-[9px] text-zinc-400 shrink-0">Step {occ.stepNumber}/10</span>
-                      </div>
-                    ))
-                  ) : (
-                    <span className="text-emerald-400 flex items-center gap-1 text-[10px]">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                      <span>Available</span>
+              return (
+                <div
+                  key={station.levelId}
+                  className={`px-2.5 py-1.5 rounded-xl border text-xs font-mono flex items-center gap-2 ${
+                    station.isFinal
+                      ? 'bg-purple-950/30 border-purple-500/40 text-purple-300'
+                      : isOccupied
+                      ? 'bg-amber-950/30 border-amber-500/40 text-amber-300'
+                      : 'bg-zinc-950/60 border-zinc-800 text-zinc-500'
+                  }`}
+                >
+                  <span className="font-bold">#{station.orderIndex} {station.title}</span>
+                  {isOccupied && occupants.length > 0 && (
+                    <span className="text-[10px] bg-amber-400/20 px-1 rounded text-amber-300">
+                      {occupants.map((o) => o.teamName).join(', ')}
                     </span>
                   )}
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* 4. TACTICAL RADIO TRANSMITTER */}
+      {/* 4. BROADCAST TRANSMITTER */}
       <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-4 flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold text-zinc-200">Broadcast Console</span>
-          <span className="text-[10px] font-mono text-zinc-500">Transmits instant HUD alert to team phones</span>
-        </div>
-
-        {/* Quick Presets */}
         <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-xs font-semibold text-zinc-300 mr-2">Broadcast:</span>
           {[
-            'Hunt is officially underway! Proceed to Objective 1.',
-            '15-Minute Warning: Clue window closing soon.',
-            'Target operative spotted near Amphitheatre grounds.',
-            'Hold position: Timers paused by Event Control.',
-            'All teams report to Start Venue for podium finish verification.',
+            'Hunt is underway!',
+            '15-Minute Warning: Clue closing soon.',
+            'Target spotted near Amphitheatre.',
+            'Hold position: Timers paused.',
           ].map((preset) => (
             <button
               key={preset}
               onClick={() => setBroadcastMsg(preset)}
-              className="text-[11px] font-mono bg-zinc-950 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 px-2 py-1 rounded-md border border-zinc-800/80 transition-all truncate max-w-xs"
+              className="text-[11px] font-mono bg-zinc-950 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 px-2 py-0.5 rounded-lg border border-zinc-800 transition-all truncate"
             >
               {preset}
             </button>
@@ -624,10 +549,10 @@ export default function AdminGame() {
             onChange={(e) => setBroadcastTarget(e.target.value === 'all' ? 'all' : Number(e.target.value))}
             className="px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-zinc-200 text-xs font-mono focus:outline-none focus:border-zinc-500"
           >
-            <option value="all">📢 ALL TEAMS</option>
+            <option value="all">📢 All Teams</option>
             {teams.map((t) => (
               <option key={t.id} value={t.id}>
-                🔒 {t.name}
+                {t.name}
               </option>
             ))}
           </select>
@@ -636,30 +561,29 @@ export default function AdminGame() {
             type="text"
             value={broadcastMsg}
             onChange={(e) => setBroadcastMsg(e.target.value)}
-            placeholder="Type announcement message…"
+            placeholder="Type message to appear on team phones…"
             className="flex-1 px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-zinc-100 text-xs focus:outline-none focus:border-zinc-500"
           />
 
           <button
             type="submit"
             disabled={isBroadcasting || !broadcastMsg.trim()}
-            className="px-4 py-2 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 font-semibold text-xs transition-all min-h-[38px] flex items-center justify-center gap-1"
+            className="px-4 py-2 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 font-bold text-xs transition-all min-h-[38px] flex items-center justify-center gap-1"
           >
             {isBroadcasting ? 'Sending…' : 'Transmit'}
           </button>
         </form>
       </div>
 
-      {/* 5. TEAM PROGRESS MATRIX & LIVE LOG */}
+      {/* 5. STREAMLINED TEAM OPERATIONS & LIVE ACTIVITY LOG */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* Teams List (8 columns) */}
+        {/* Teams List (8 cols) */}
         <div className="lg:col-span-8 bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-4 flex flex-col gap-3">
+          {/* Header & Search */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-zinc-800">
-            <div>
-              <span className="text-xs font-semibold text-zinc-100">
-                Team Operations ({filteredTeams.length} of {teams.length})
-              </span>
-            </div>
+            <span className="text-xs font-semibold text-zinc-100">
+              Team Operations ({filteredTeams.length} / {teams.length})
+            </span>
 
             <div className="flex items-center gap-2">
               <input
@@ -667,48 +591,32 @@ export default function AdminGame() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search teams…"
-                className="px-2.5 py-1.5 rounded-lg bg-zinc-950 border border-zinc-800 text-zinc-200 text-xs font-mono focus:outline-none focus:border-zinc-600 w-40"
+                className="px-2.5 py-1.5 rounded-lg bg-zinc-950 border border-zinc-800 text-zinc-200 text-xs font-mono focus:outline-none focus:border-zinc-500 w-36"
               />
 
-              <button
-                onClick={reload}
-                className="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-mono"
-              >
-                ↻
-              </button>
+              {/* Filter Pills */}
+              <div className="flex items-center gap-1 bg-zinc-950 p-1 rounded-lg border border-zinc-800 text-[10px] font-mono">
+                {(['all', 'active', 'finished'] as const).map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => setFilter(f)}
+                    className={`px-2 py-0.5 rounded capitalize ${filter === f ? 'bg-zinc-800 text-white font-bold' : 'text-zinc-400'}`}
+                  >
+                    {f}
+                  </button>
+                ))}
+              </div>
 
               <NavLink
                 to="/admin/teams"
-                className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium border border-zinc-700"
+                className="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-mono"
               >
-                + Add Team
+                + Roster
               </NavLink>
             </div>
           </div>
 
-          {/* Filter Pills */}
-          <div className="flex flex-wrap items-center gap-1 text-[11px] font-mono">
-            {[
-              { id: 'all', label: `All (${teams.length})` },
-              { id: 'active', label: `In Field (${stats.active})` },
-              { id: 'final', label: `Finale (${stats.atFinale})` },
-              { id: 'finished', label: `Finished (${stats.finished})` },
-            ].map((f) => (
-              <button
-                key={f.id}
-                onClick={() => setFilter(f.id as any)}
-                className={`px-2.5 py-1 rounded-md transition-all ${
-                  filter === f.id
-                    ? 'bg-zinc-100 text-zinc-950 font-bold'
-                    : 'bg-zinc-950 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Team Cards */}
+          {/* Clean, De-cluttered Team Rows */}
           <div className="space-y-2 mt-1">
             {filteredTeams.map((team) => {
               const currentLevelOrder = team.levelProgress?.[0]?.level?.orderIndex ?? 1;
@@ -717,152 +625,164 @@ export default function AdminGame() {
               const activeProgress = team.levelProgress?.[0];
               const reachedLocation = Boolean(activeProgress?.locationReachedAt);
               const penaltyMinutesTotal = team.penalties?.reduce((acc: number, p: any) => acc + (p.minutes || 0), 0) ?? 0;
+              const isAtFinale = levels.length > 0 && currentLevelOrder >= levels.length;
+              const isMenuOpen = openMenuTeamId === team.id;
 
               return (
                 <div
                   key={team.id}
-                  className={`p-3.5 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs ${
+                  className={`p-3 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs relative ${
                     isFinished
                       ? 'bg-emerald-950/15 border-emerald-500/30'
                       : 'bg-zinc-950/60 border-zinc-800/80'
                   }`}
                 >
-                  <div className="flex flex-col gap-1.5 min-w-[200px]">
+                  {/* Left: Squad Info */}
+                  <div className="flex flex-col gap-1 min-w-[200px]">
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-white text-sm">{team.name}</span>
                       {isFinished ? (
                         <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
-                          FINISHED
+                          FINISHED 🏁
                         </span>
                       ) : (
-                        <span className="text-[10px] font-mono text-zinc-400">
-                          Stage {currentLevelOrder} {reachedLocation ? '(GPS ✓)' : ''}
+                        <span className="text-[10px] font-mono text-zinc-300 bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800">
+                          Stage {currentLevelOrder}/10
                         </span>
+                      )}
+
+                      {/* GPS indicator dot */}
+                      {!isFinished && (
+                        <span
+                          className={`w-2 h-2 rounded-full ${reachedLocation ? 'bg-emerald-400' : 'bg-zinc-600'}`}
+                          title={reachedLocation ? 'GPS target reached' : 'Approaching landmark'}
+                        />
                       )}
                     </div>
 
-                    {/* Access code badge & copy/reset */}
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-[10px] text-zinc-400 font-mono">Code:</span>
-                      <span className="text-[11px] font-mono font-bold text-cyan-300 bg-cyan-950/60 px-1.5 py-0.5 rounded border border-cyan-500/30">
+                    <div className="flex items-center gap-2 text-[11px] font-mono">
+                      <span className="text-zinc-500">Code:</span>
+                      <span className="text-amber-300 font-bold select-all">
                         {team.displayCode || '••••••'}
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => handleCopyCode(team.id, team.displayCode || '')}
-                        className="text-[10px] text-zinc-400 hover:text-white px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 font-mono transition-all"
-                        title="Copy access code to clipboard"
-                      >
-                        {copiedTeamId === team.id ? '✓ Copied' : '📋 Copy'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setResetCodeTeam(team);
-                          setNewCodeInput('');
-                        }}
-                        className="text-[10px] text-cyan-400 hover:text-cyan-300 px-1.5 py-0.5 rounded bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/30 font-mono transition-all"
-                        title="Reset access code"
-                      >
-                        🔑 Reset
-                      </button>
-                    </div>
-
-                    {/* Progress indicators */}
-                    <div className="flex items-center gap-1 font-mono text-[10px]">
-                      {levels.map((lvl) => {
-                        const isDone = currentLevelOrder > lvl.orderIndex || isFinished;
-                        const isCurrent = currentLevelOrder === lvl.orderIndex && !isFinished;
-                        return (
-                          <span
-                            key={lvl.id}
-                            className={`px-1.5 py-0.5 rounded ${
-                              isDone
-                                ? 'bg-zinc-800 text-zinc-300'
-                                : isCurrent
-                                ? 'bg-zinc-100 text-zinc-950 font-bold'
-                                : 'text-zinc-600'
-                            }`}
-                          >
-                            L{lvl.orderIndex}
-                          </span>
-                        );
-                      })}
+                      {team.displayCode && (
+                        <button
+                          type="button"
+                          onClick={() => handleCopyCode(team.id, team.displayCode)}
+                          className="text-[10px] text-zinc-400 hover:text-white px-1 py-0.5 rounded bg-zinc-800"
+                        >
+                          {copiedTeamId === team.id ? '✓' : 'Copy'}
+                        </button>
+                      )}
 
                       {penaltyMinutesTotal !== 0 && (
-                        <span className={`ml-2 ${penaltyMinutesTotal > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                        <span className={`ml-1 font-bold ${penaltyMinutesTotal > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
                           {penaltyMinutesTotal > 0 ? `+${penaltyMinutesTotal}` : penaltyMinutesTotal}m
                         </span>
                       )}
                     </div>
                   </div>
 
-                  {/* Actions */}
-                  <div className="flex flex-wrap items-center gap-1.5">
+                  {/* Right: Streamlined Action Controls */}
+                  <div className="flex items-center gap-2">
                     {!isFinished ? (
                       <>
-                        {!reachedLocation && (
+                        {/* Primary Action Button */}
+                        {isAtFinale ? (
                           <button
-                            onClick={() => handleBypassGps(team.id, team.name)}
+                            onClick={() => setConfirmTeamAction({ type: 'finish', team })}
                             disabled={isLoadingThis}
-                            className="px-2.5 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 font-mono text-[11px] font-bold border border-emerald-500/40 transition-all active:scale-95 flex items-center gap-1 shadow-sm"
-                            title="Bypass GPS check & decrypt clue text on squad's phone immediately"
+                            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-all shadow"
                           >
-                            <span>🔓</span>
-                            <span>Bypass GPS</span>
+                            {isLoadingThis ? 'Verifying…' : 'Verify Finish 🏁'}
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => setConfirmTeamAction({ type: 'advance', team })}
+                            disabled={isLoadingThis}
+                            className="px-3 py-1.5 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 font-bold text-xs transition-all active:scale-95 shadow"
+                          >
+                            <span>Advance ➔</span>
                           </button>
                         )}
 
-                        <button
-                          onClick={() => setConfirmTeamAction({ type: 'advance', team })}
-                          disabled={isLoadingThis}
-                          className="px-2.5 py-1.5 rounded-lg bg-cyan-950/60 hover:bg-cyan-900/80 text-cyan-300 font-mono text-[11px] font-bold border border-cyan-500/40 transition-all active:scale-95 flex items-center gap-1"
-                          title="Force complete current level and advance squad to next clue"
-                        >
-                          <span>⏩</span>
-                          <span>Advance ➔</span>
-                        </button>
+                        {/* More Actions Dropdown Toggle */}
+                        <div className="relative">
+                          <button
+                            onClick={() => setOpenMenuTeamId(isMenuOpen ? null : team.id)}
+                            className="px-2.5 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-mono text-xs border border-zinc-700 transition-all flex items-center gap-1"
+                            title="More squad actions"
+                          >
+                            <span>Actions ▾</span>
+                          </button>
 
-                        <button
-                          onClick={() => {
-                            setJumpTeam(team);
-                            setTargetJumpStep(Math.min(10, currentLevelOrder + 1));
-                          }}
-                          disabled={isLoadingThis}
-                          className="px-2 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 font-mono text-[11px] border border-zinc-700 transition-all"
-                          title="Jump squad directly to any specific stage (1 to 10)"
-                        >
-                          🔀 Jump…
-                        </button>
+                          {/* Popover Menu */}
+                          {isMenuOpen && (
+                            <div className="absolute right-0 top-full mt-1.5 w-48 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl p-1 z-50 flex flex-col gap-1 text-xs font-mono">
+                              {!reachedLocation && (
+                                <button
+                                  onClick={() => {
+                                    setOpenMenuTeamId(null);
+                                    handleBypassGps(team.id, team.name);
+                                  }}
+                                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-zinc-800 text-emerald-300 flex items-center gap-2"
+                                >
+                                  <span>🔓</span>
+                                  <span>Bypass GPS</span>
+                                </button>
+                              )}
 
-                        <button
-                          onClick={() => setConfirmTeamAction({ type: 'finish', team })}
-                          disabled={isLoadingThis}
-                          className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-all shadow-md"
-                        >
-                          {isLoadingThis ? 'Verifying…' : 'Verify Finish'}
-                        </button>
+                              <button
+                                onClick={() => {
+                                  setOpenMenuTeamId(null);
+                                  setJumpTeam(team);
+                                  setTargetJumpStep(Math.min(10, currentLevelOrder + 1));
+                                }}
+                                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-zinc-800 text-zinc-200 flex items-center gap-2"
+                              >
+                                <span>🔀</span>
+                                <span>Jump Stage…</span>
+                              </button>
 
-                        <button
-                          onClick={() => {
-                            setPenaltyTeam(team);
-                            setPenaltyMinutes(5);
-                            setPenaltyReason('Time adjustment');
-                          }}
-                          className="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-mono text-[11px] border border-zinc-700"
-                        >
-                          +/- Time
-                        </button>
+                              <button
+                                onClick={() => {
+                                  setOpenMenuTeamId(null);
+                                  setPenaltyTeam(team);
+                                  setPenaltyMinutes(5);
+                                  setPenaltyReason('Time adjustment');
+                                }}
+                                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-zinc-800 text-zinc-200 flex items-center gap-2"
+                              >
+                                <span>⏱️</span>
+                                <span>Adjust Time</span>
+                              </button>
 
-                        <button
-                          onClick={() => {
-                            setNudgeTeam(team);
-                            setNudgeText('');
-                          }}
-                          className="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-mono text-[11px] border border-zinc-700"
-                        >
-                          Nudge
-                        </button>
+                              <button
+                                onClick={() => {
+                                  setOpenMenuTeamId(null);
+                                  setNudgeTeam(team);
+                                  setNudgeText('');
+                                }}
+                                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-zinc-800 text-cyan-300 flex items-center gap-2"
+                              >
+                                <span>📡</span>
+                                <span>Radio Nudge</span>
+                              </button>
+
+                              <button
+                                onClick={() => {
+                                  setOpenMenuTeamId(null);
+                                  setResetCodeTeam(team);
+                                  setNewCodeInput('');
+                                }}
+                                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-zinc-800 text-amber-300 flex items-center gap-2 border-t border-zinc-800"
+                              >
+                                <span>🔑</span>
+                                <span>Reset Code</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </>
                     ) : (
                       <span className="text-zinc-500 font-mono text-xs">
@@ -876,16 +796,16 @@ export default function AdminGame() {
           </div>
         </div>
 
-        {/* Right: Live Event Activity Log (4 columns) */}
+        {/* Right: Live Activity Feed (4 cols) */}
         <div className="lg:col-span-4 bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-4 flex flex-col gap-3">
           <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
             <span className="text-xs font-semibold text-zinc-100">Live Activity Feed</span>
-            <span className="text-[10px] font-mono text-zinc-500">Real-time Stream</span>
+            <span className="text-[10px] font-mono text-zinc-500">Real-time</span>
           </div>
 
           <div className="space-y-2 overflow-y-auto max-h-[460px] pr-1 font-mono text-[11px]">
             {activityLogs.length === 0 ? (
-              <p className="text-zinc-600 text-xs py-8 text-center">Activity milestones will stream here live…</p>
+              <p className="text-zinc-600 text-xs py-8 text-center">Activity will stream here live…</p>
             ) : (
               activityLogs.map((log) => (
                 <div key={log.id} className="p-2 rounded-lg bg-zinc-950/60 border border-zinc-800/60 flex flex-col gap-0.5">
@@ -898,69 +818,15 @@ export default function AdminGame() {
         </div>
       </div>
 
-      {/* TIME ADJUSTMENT MODAL */}
-      {penaltyTeam && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-5 max-w-sm w-full shadow-2xl flex flex-col gap-3">
-            <h3 className="font-semibold text-white text-sm">Time Adjustment: {penaltyTeam.name}</h3>
-            <p className="text-xs text-zinc-400 font-mono">Add penalty or grant bonus time to official score.</p>
-
-            <form onSubmit={handleApplyPenalty} className="space-y-3">
-              <div>
-                <label className="text-[11px] text-zinc-400 block mb-1">Minutes (+ for penalty, - for bonus)</label>
-                <input
-                  type="number"
-                  value={penaltyMinutes}
-                  onChange={(e) => setPenaltyMinutes(Number(e.target.value))}
-                  className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-xs font-mono text-white focus:outline-none focus:border-zinc-500"
-                />
-              </div>
-
-              <div>
-                <label className="text-[11px] text-zinc-400 block mb-1">Reason / Note</label>
-                <input
-                  type="text"
-                  value={penaltyReason}
-                  onChange={(e) => setPenaltyReason(e.target.value)}
-                  placeholder="e.g. Restricted yard entry"
-                  className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-xs font-mono text-white focus:outline-none focus:border-zinc-500"
-                />
-              </div>
-
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setPenaltyTeam(null)}
-                  className="flex-1 py-2 rounded-xl bg-zinc-800 text-zinc-300 text-xs font-medium"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold"
-                >
-                  Apply
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
+      {/* MODALS */}
       {/* NUDGE MODAL */}
       {nudgeTeam && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-5 max-w-sm w-full shadow-2xl flex flex-col gap-3">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 max-w-sm w-full shadow-2xl flex flex-col gap-3">
             <h3 className="font-semibold text-white text-sm">Nudge {nudgeTeam.name}</h3>
-            <p className="text-xs text-zinc-400 font-mono">Send a subtle direction cue to their screen:</p>
 
             <div className="grid grid-cols-2 gap-1.5 font-mono text-xs">
-              {[
-                'Getting warmer!',
-                'Getting colder…',
-                'Target nearby!',
-                'Check library lawn',
-              ].map((msg) => (
+              {['Getting warmer!', 'Getting colder…', 'Target nearby!', 'Check library lawn'].map((msg) => (
                 <button
                   key={msg}
                   type="button"
@@ -1002,30 +868,28 @@ export default function AdminGame() {
         </div>
       )}
 
-      {/* NON-BLOCKING IN-APP CONFIRMATION MODAL (Never suppressed by browser pop-up blockers) */}
+      {/* CONFIRM GAME ACTION MODAL */}
       {confirmAction && (
         <div className="fixed inset-0 z-[9999] bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-700 rounded-3xl p-6 max-w-md w-full shadow-2xl flex flex-col gap-4 text-zinc-100 animate-in fade-in zoom-in-95">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 max-w-md w-full shadow-2xl flex flex-col gap-4 text-zinc-100">
             <div className="flex items-center gap-3">
               <span className="w-10 h-10 rounded-2xl bg-rose-950 border border-rose-500/50 flex items-center justify-center text-xl shrink-0">
                 {confirmAction === 'end' ? '⏹' : '⚠️'}
               </span>
               <div>
                 <h3 className="text-base font-bold text-white">
-                  {confirmAction === 'end' ? 'Conclude Campus Hunt 2026?' : 'Reset All Progress to Standby?'}
+                  {confirmAction === 'end' ? 'Conclude Campus Hunt?' : 'Reset All Progress?'}
                 </h3>
                 <p className="text-xs text-zinc-400 mt-0.5">
-                  {confirmAction === 'end'
-                    ? 'Official Field Action Directive'
-                    : 'Emergency System Reset'}
+                  {confirmAction === 'end' ? 'End event for all squads' : 'Emergency State Reset'}
                 </p>
               </div>
             </div>
 
             <p className="text-xs text-zinc-300 leading-relaxed font-mono bg-zinc-950 p-3.5 rounded-xl border border-zinc-800">
               {confirmAction === 'end'
-                ? 'Are you sure you want to officially END the hunt for all squads? All timers and field operations will freeze immediately, and final leaderboard standings will be permanently locked.'
-                : 'Are you sure you want to RESET all teams, paths, scores, and timers back to initial idle standby? This will wipe the active session.'}
+                ? 'End the hunt for all squads? All timers and field operations will freeze immediately, and final standings will be locked.'
+                : 'Reset all teams, paths, scores, and timers back to initial standby?'}
             </p>
 
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-800">
@@ -1041,8 +905,8 @@ export default function AdminGame() {
                 onClick={() => executeGameAction(confirmAction)}
                 className={`px-4 py-2 rounded-xl font-bold text-xs transition-all shadow-lg ${
                   confirmAction === 'end'
-                    ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-950/80'
-                    : 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-950/80'
+                    ? 'bg-rose-600 hover:bg-rose-500 text-white'
+                    : 'bg-amber-600 hover:bg-amber-500 text-white'
                 }`}
               >
                 {confirmAction === 'end' ? 'Yes, Conclude Hunt' : 'Yes, Reset State'}
@@ -1052,114 +916,75 @@ export default function AdminGame() {
         </div>
       )}
 
-      {/* STAGE JUMP EMERGENCY OVERRIDE MODAL */}
+      {/* STAGE JUMP MODAL */}
       {jumpTeam && (
         <div className="fixed inset-0 z-[9999] bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-700 rounded-3xl p-6 max-w-md w-full shadow-2xl flex flex-col gap-4 text-zinc-100 animate-in fade-in zoom-in-95">
-            <div className="flex items-center gap-3">
-              <span className="w-10 h-10 rounded-2xl bg-cyan-950 border border-cyan-500/50 flex items-center justify-center text-xl shrink-0">
-                🔀
-              </span>
-              <div>
-                <h3 className="text-base font-bold text-white">
-                  Stage Override: {jumpTeam.name}
-                </h3>
-                <p className="text-xs text-zinc-400 mt-0.5 font-mono">
-                  Emergency Directive: Force move squad to target step
-                </p>
-              </div>
-            </div>
+          <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 max-w-md w-full shadow-2xl flex flex-col gap-4 text-zinc-100">
+            <h3 className="text-base font-bold text-white">
+              Stage Override: {jumpTeam.name}
+            </h3>
 
-            <div className="flex flex-col gap-2">
-              <label className="text-[10px] font-mono uppercase text-zinc-400 font-bold">
-                Select Destination Stage (1 to 10):
-              </label>
-              <div className="grid grid-cols-5 gap-2 font-mono text-xs">
-                {Array.from({ length: 10 }, (_, i) => i + 1).map((step) => {
-                  const isSelected = targetJumpStep === step;
-                  const isFinale = step === 10;
-                  return (
-                    <button
-                      key={step}
-                      type="button"
-                      onClick={() => setTargetJumpStep(step)}
-                      className={`py-2.5 rounded-xl font-bold border transition-all text-center flex flex-col items-center justify-center ${
-                        isSelected
-                          ? isFinale
-                            ? 'bg-purple-600 border-purple-400 text-white shadow-lg shadow-purple-950'
-                            : 'bg-cyan-500 border-cyan-400 text-zinc-950 shadow-lg shadow-cyan-950'
-                          : 'bg-zinc-950 border-zinc-800 text-zinc-300 hover:border-zinc-600'
-                      }`}
-                    >
-                      <span>Stage {step}</span>
-                      {isFinale && <span className="text-[9px] uppercase tracking-wider">Finale 🏁</span>}
-                    </button>
-                  );
-                })}
-              </div>
+            <div className="grid grid-cols-5 gap-2 font-mono text-xs">
+              {Array.from({ length: 10 }, (_, i) => i + 1).map((step) => {
+                const isSelected = targetJumpStep === step;
+                return (
+                  <button
+                    key={step}
+                    type="button"
+                    onClick={() => setTargetJumpStep(step)}
+                    className={`py-2 rounded-xl font-bold border transition-all text-center ${
+                      isSelected
+                        ? 'bg-zinc-100 text-zinc-950 border-white'
+                        : 'bg-zinc-950 border-zinc-800 text-zinc-300'
+                    }`}
+                  >
+                    Stage {step}
+                  </button>
+                );
+              })}
             </div>
-
-            <p className="text-[11px] font-mono text-zinc-400 bg-zinc-950 p-3 rounded-xl border border-zinc-800 leading-relaxed">
-              Moving {jumpTeam.name} to <strong>Stage {targetJumpStep}</strong> will mark prior objectives as cleared by admin override and instantly drop their Stage {targetJumpStep} landmark clue onto their device.
-            </p>
 
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-800">
               <button
                 type="button"
                 onClick={() => setJumpTeam(null)}
-                className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium"
+                className="px-4 py-2 rounded-xl bg-zinc-800 text-zinc-300 text-xs font-medium"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={handleExecuteJumpStage}
-                className="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-zinc-950 font-bold text-xs transition-all shadow-lg shadow-cyan-950"
+                className="px-4 py-2 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-zinc-950 font-bold text-xs"
               >
-                Confirm Move to Stage {targetJumpStep} ➔
+                Confirm Move ➔
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* CONFIRM TEAM ACTION MODAL (Advance / Finish) */}
+      {/* CONFIRM TEAM ACTION MODAL */}
       {confirmTeamAction && (
         <div className="fixed inset-0 z-[9999] bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-700 rounded-3xl p-6 max-w-md w-full shadow-2xl flex flex-col gap-4 text-zinc-100 animate-in fade-in zoom-in-95">
-            <div className="flex items-center gap-3">
-              <span className={`w-10 h-10 rounded-2xl flex items-center justify-center text-xl shrink-0 border ${
-                confirmTeamAction.type === 'finish'
-                  ? 'bg-emerald-950 border-emerald-500/50 text-emerald-300'
-                  : 'bg-cyan-950 border-cyan-500/50 text-cyan-300'
-              }`}>
-                {confirmTeamAction.type === 'finish' ? '🏆' : '⏩'}
-              </span>
-              <div>
-                <h3 className="text-base font-bold text-white">
-                  {confirmTeamAction.type === 'finish'
-                    ? `Verify Podium Finish: "${confirmTeamAction.team.name}"`
-                    : `Force Advance: "${confirmTeamAction.team.name}"`}
-                </h3>
-                <p className="text-xs text-zinc-400 mt-0.5 font-mono">
-                  {confirmTeamAction.type === 'finish'
-                    ? 'Start Venue Podium Sign-Off'
-                    : 'Emergency Field Directive'}
-                </p>
-              </div>
-            </div>
-
-            <p className="text-xs text-zinc-300 leading-relaxed font-mono bg-zinc-950 p-3.5 rounded-xl border border-zinc-800">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 max-w-md w-full shadow-2xl flex flex-col gap-4 text-zinc-100">
+            <h3 className="text-base font-bold text-white">
               {confirmTeamAction.type === 'finish'
-                ? `Confirm official finish verification for ${confirmTeamAction.team.name}. Their final stopwatch time will be locked and posted to the official leaderboard podium.`
-                : `Force complete current level for ${confirmTeamAction.team.name} and advance squad to the next stage along their route?`}
+                ? `Verify Finish: "${confirmTeamAction.team.name}"`
+                : `Advance: "${confirmTeamAction.team.name}"`}
+            </h3>
+
+            <p className="text-xs text-zinc-300 font-mono bg-zinc-950 p-3 rounded-xl border border-zinc-800">
+              {confirmTeamAction.type === 'finish'
+                ? `Confirm official podium finish for ${confirmTeamAction.team.name}. Their elapsed time will be locked.`
+                : `Advance ${confirmTeamAction.team.name} to their next stage?`}
             </p>
 
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-800">
               <button
                 type="button"
                 onClick={() => setConfirmTeamAction(null)}
-                className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium transition-all"
+                className="px-4 py-2 rounded-xl bg-zinc-800 text-zinc-300 text-xs font-medium"
               >
                 Cancel
               </button>
@@ -1172,15 +997,62 @@ export default function AdminGame() {
                     handleForceAdvance(confirmTeamAction.team.id, confirmTeamAction.team.name);
                   }
                 }}
-                className={`px-4 py-2 rounded-xl font-bold text-xs transition-all shadow-lg ${
+                className={`px-4 py-2 rounded-xl font-bold text-xs ${
                   confirmTeamAction.type === 'finish'
-                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-950'
-                    : 'bg-cyan-600 hover:bg-cyan-500 text-white shadow-cyan-950'
+                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                    : 'bg-zinc-100 hover:bg-white text-zinc-950'
                 }`}
               >
-                {confirmTeamAction.type === 'finish' ? 'Yes, Verify Finish' : 'Yes, Force Advance'}
+                Confirm
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* TIME ADJUSTMENT MODAL */}
+      {penaltyTeam && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 max-w-sm w-full shadow-2xl flex flex-col gap-3">
+            <h3 className="font-semibold text-white text-sm">Time Adjustment: {penaltyTeam.name}</h3>
+
+            <form onSubmit={handleApplyPenalty} className="flex flex-col gap-3">
+              <div>
+                <label className="text-[11px] font-medium text-zinc-400 block mb-1">Minutes (+ penalty / - bonus)</label>
+                <input
+                  type="number"
+                  value={penaltyMinutes}
+                  onChange={(e) => setPenaltyMinutes(Number(e.target.value))}
+                  className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-xs font-mono text-white"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-medium text-zinc-400 block mb-1">Reason</label>
+                <input
+                  type="text"
+                  value={penaltyReason}
+                  onChange={(e) => setPenaltyReason(e.target.value)}
+                  className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-xs text-white"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2 border-t border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setPenaltyTeam(null)}
+                  className="flex-1 py-2 rounded-xl bg-zinc-800 text-zinc-300 text-xs font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-bold"
+                >
+                  Apply
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -1189,62 +1061,49 @@ export default function AdminGame() {
       {resetCodeTeam && (
         <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-sm w-full p-5 shadow-2xl flex flex-col gap-4">
-            <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
-              <div>
-                <h3 className="font-semibold text-white text-sm">Reset Access Code</h3>
-                <p className="text-xs text-cyan-400 font-mono">Squad: {resetCodeTeam.name}</p>
-              </div>
+            <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
+              <h3 className="font-semibold text-white text-sm">Reset Code: {resetCodeTeam.name}</h3>
               <button
                 onClick={() => setResetCodeTeam(null)}
-                className="w-7 h-7 rounded-lg bg-zinc-800 text-zinc-400 hover:text-white flex items-center justify-center font-mono text-xs"
+                className="text-zinc-400 hover:text-white font-mono text-xs"
               >
                 ✕
               </button>
             </div>
 
-            <form onSubmit={handleSaveNewCode} className="space-y-4">
-              <div>
-                <label className="text-xs text-zinc-400 block mb-1">
-                  New Access Code (letters & numbers):
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={newCodeInput}
-                    onChange={(e) => setNewCodeInput(e.target.value)}
-                    placeholder="e.g. cyber26"
-                    className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-xs font-mono text-white focus:outline-none focus:border-cyan-500 uppercase tracking-wider"
-                    required
-                  />
-                  <button
-                    type="button"
-                    onClick={generateResetCode}
-                    className="px-3 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-mono"
-                    title="Generate random password"
-                  >
-                    🎲 Gen
-                  </button>
-                </div>
+            <form onSubmit={handleSaveNewCode} className="space-y-3">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newCodeInput}
+                  onChange={(e) => setNewCodeInput(e.target.value)}
+                  placeholder="New code…"
+                  className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-xs font-mono text-white uppercase"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={generateResetCode}
+                  className="px-3 py-2 rounded-xl bg-zinc-800 text-zinc-300 text-xs font-mono"
+                >
+                  🎲
+                </button>
               </div>
-
-              <p className="text-[11px] text-zinc-500 font-mono leading-relaxed">
-                Saving this will immediately update the squad's password and terminate any active sessions on their phones.
-              </p>
 
               <div className="pt-2 border-t border-zinc-800 flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setResetCodeTeam(null)}
-                  className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium"
+                  className="px-3 py-1.5 rounded-xl bg-zinc-800 text-zinc-300 text-xs"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isResettingCode || !newCodeInput.trim()}
-                  className="px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-all shadow-md disabled:opacity-50"
+                  className="px-3.5 py-1.5 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-zinc-950 text-xs font-bold font-mono"
                 >
-                  {isResettingCode ? 'Updating…' : 'Update Access Code'}
+                  {isResettingCode ? 'Saving…' : 'Save'}
                 </button>
               </div>
             </form>

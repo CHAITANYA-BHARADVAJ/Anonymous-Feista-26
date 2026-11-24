@@ -8,6 +8,7 @@
     "db:migrate": "npm run db:migrate --workspace=packages/server",
     "db:seed": "npm run db:seed --workspace=packages/server",
     "build": "npm run build --workspace=packages/client && npm run build --workspace=packages/server",
+    "test": "npx tsx tests/run_all_tests.ts",
     "start": "npm start --workspace=packages/server"
   },
   "devDependencies": {

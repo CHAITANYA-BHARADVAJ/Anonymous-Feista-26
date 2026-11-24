@@ -1,5 +1,5 @@
-import { useEffect, useState, useMemo, useRef } from 'react';
-import { MapContainer, TileLayer, Polygon, Circle, Marker, Popup, ImageOverlay, useMap } from 'react-leaflet';
+import { useEffect, useState, useMemo } from 'react';
+import { MapContainer, TileLayer, Polygon, Circle, Marker, Popup, Tooltip, ImageOverlay, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -35,7 +35,7 @@ function MapController({
         map.flyTo(fitBoundsCoords[0], 18, { duration: 1 });
       } else {
         const bounds = L.latLngBounds(fitBoundsCoords);
-        map.fitBounds(bounds, { padding: [50, 50], maxZoom: 19 });
+        map.fitBounds(bounds, { padding: [60, 60], maxZoom: 19 });
       }
     }
   }, [fitBoundsCoords, map]);
@@ -43,7 +43,7 @@ function MapController({
   return null;
 }
 
-// Generate color palette for teams
+// Color palette for team markers
 const TEAM_COLORS = [
   '#06b6d4', // cyan
   '#10b981', // emerald
@@ -61,40 +61,40 @@ function getTeamColor(teamId: number): string {
   return TEAM_COLORS[teamId % TEAM_COLORS.length];
 }
 
-// Create custom leaflet marker icon for a team
+// Custom leaflet marker icon for a team
 function createTeamMarkerIcon(
   teamName: string,
   teamId: number,
   isFinished: boolean,
   isSelected: boolean,
 ) {
-  const color = isFinished ? '#6ee7b7' : getTeamColor(teamId);
+  const color = isFinished ? '#34d399' : getTeamColor(teamId);
 
   return L.divIcon({
     className: 'custom-admin-team-marker',
     html: `
-      <div class="relative flex flex-col items-center justify-center transform -translate-x-1/2 -translate-y-1/2 cursor-pointer transition-transform hover:scale-110 select-none">
+      <div class="relative flex flex-col items-center justify-center transform -translate-x-1/2 -translate-y-1/2 cursor-pointer transition-transform hover:scale-125 select-none">
         ${
           isSelected
-            ? `<div class="absolute -inset-2 rounded-full bg-cyan-400/30 animate-pulse"></div>`
+            ? `<div class="absolute -inset-2.5 rounded-full bg-cyan-400/40 animate-ping pointer-events-none"></div>`
             : ''
         }
-        <div class="relative w-7 h-7 rounded-full flex items-center justify-center shadow-xl border-2 ${
+        <div class="relative w-7 h-7 rounded-full flex items-center justify-center shadow-2xl border-2 ${
           isFinished
             ? 'bg-emerald-950 border-emerald-400 text-emerald-300'
             : isSelected
             ? 'bg-zinc-950 border-cyan-400 text-cyan-300 scale-110'
-            : 'bg-zinc-950 border-zinc-700 text-white'
+            : 'bg-zinc-950 text-white'
         }" style="border-color: ${color};">
           <span class="text-[10px] font-mono font-black">#${teamId}</span>
         </div>
-        <div class="mt-1 px-1.5 py-0.5 rounded-md bg-zinc-950/90 backdrop-blur-md border border-zinc-800 text-[10px] font-mono font-bold text-zinc-200 tracking-tight whitespace-nowrap shadow-md max-w-[110px] truncate" style="border-bottom: 2px solid ${color};">
+        <div class="mt-1 px-1.5 py-0.5 rounded-md bg-zinc-950/95 backdrop-blur-md border border-zinc-800 text-[10px] font-mono font-bold text-zinc-200 tracking-tight whitespace-nowrap shadow-xl max-w-[120px] truncate" style="border-bottom: 2px solid ${color};">
           ${teamName}
         </div>
       </div>
     `,
-    iconSize: [30, 42],
-    iconAnchor: [15, 21],
+    iconSize: [32, 42],
+    iconAnchor: [16, 21],
   });
 }
 
@@ -103,8 +103,8 @@ function createLandmarkIcon(orderIndex: number, isFinal: boolean) {
   return L.divIcon({
     className: 'custom-admin-landmark-marker',
     html: `
-      <div class="relative flex flex-col items-center justify-center transform -translate-x-1/2 -translate-y-1/2 select-none">
-        <div class="w-6 h-6 rounded-full flex items-center justify-center shadow-md border ${
+      <div class="relative flex flex-col items-center justify-center transform -translate-x-1/2 -translate-y-1/2 select-none hover:scale-110 transition-transform">
+        <div class="w-6 h-6 rounded-full flex items-center justify-center shadow-lg border ${
           isFinal
             ? 'bg-purple-950 border-purple-400 text-purple-300'
             : 'bg-zinc-900 border-zinc-700 text-zinc-300'
@@ -127,16 +127,15 @@ export default function AdminMap() {
 
   // Focus and Selection
   const [selectedTeamId, setSelectedTeamId] = useState<number | null>(null);
+  const [hoveredTeamId, setHoveredTeamId] = useState<number | null>(null);
   const [focusCoords, setFocusCoords] = useState<[number, number] | null>(null);
   const [fitBoundsCoords, setFitBoundsCoords] = useState<[number, number][] | null>(null);
-  const [filter, setFilter] = useState<'all' | 'active' | 'finished'>('all');
-  const [showRosterDrawer, setShowRosterDrawer] = useState<boolean>(true);
-  const [search, setSearch] = useState<string>('');
 
   // Nudge Modal State
   const [nudgeTeam, setNudgeTeam] = useState<any | null>(null);
   const [nudgeMessage, setNudgeMessage] = useState<string>('');
   const [isSendingNudge, setIsSendingNudge] = useState<boolean>(false);
+  const [copiedCodeTeamId, setCopiedCodeTeamId] = useState<number | null>(null);
 
   // Live real-time location state: teamId -> { lat, lng, recordedAt }
   const [liveLocations, setLiveLocations] = useState<
@@ -145,7 +144,7 @@ export default function AdminMap() {
 
   const activeSource = SATELLITE_SOURCES[selectedSourceKey] ?? SATELLITE_SOURCES.google;
 
-  // Load initial state
+  // Load initial telemetry
   useEffect(() => {
     reloadAll();
 
@@ -199,7 +198,7 @@ export default function AdminMap() {
       setGame(activeGame);
       setTeams(teamsData);
 
-      // Populate initial locations from teamsData
+      // Populate initial locations
       const initialLocs: Record<number, { lat: number; lng: number; recordedAt: string }> = {};
       for (const t of teamsData) {
         if (t.locations && t.locations[0]) {
@@ -253,30 +252,23 @@ export default function AdminMap() {
         hasLocation: lat != null && lng != null,
         isFinished,
         currentStep,
-        activeLevelTitle: activeProgress?.level?.title ?? (isFinished ? 'Completed Hunt' : 'Waiting for Clue'),
+        activeLevelTitle: activeProgress?.level?.title ?? (isFinished ? 'Completed Hunt 🏁' : 'Objective 1'),
       };
     });
   }, [teams, liveLocations]);
 
-  // Filtered teams list
-  const filteredTeams = useMemo(() => {
-    return teamsWithLocations.filter((t) => {
-      if (search.trim()) {
-        const matches = t.name.toLowerCase().includes(search.toLowerCase());
-        if (!matches) return false;
-      }
-      if (filter === 'active') return !t.isFinished;
-      if (filter === 'finished') return t.isFinished;
-      return true;
-    });
-  }, [teamsWithLocations, search, filter]);
-
   // Teams that have a physical GPS location on map
   const mappedTeams = useMemo(() => {
-    return filteredTeams.filter((t) => t.hasLocation);
-  }, [filteredTeams]);
+    return teamsWithLocations.filter((t) => t.hasLocation);
+  }, [teamsWithLocations]);
 
-  // Fit all active squads on map
+  const activeFocusTeam = useMemo(() => {
+    const targetId = selectedTeamId ?? hoveredTeamId;
+    if (!targetId) return null;
+    return teamsWithLocations.find((t) => t.id === targetId) ?? null;
+  }, [teamsWithLocations, selectedTeamId, hoveredTeamId]);
+
+  // Fit all squads on map
   function handleFitAllSquads() {
     const coords: [number, number][] = mappedTeams.map((t) => [t.lat, t.lng]);
     if (coords.length > 0) {
@@ -286,12 +278,11 @@ export default function AdminMap() {
     }
   }
 
-  // Focus a specific squad
-  function handleSelectSquad(team: any) {
-    setSelectedTeamId(team.id);
-    if (team.hasLocation) {
-      setFocusCoords([team.lat, team.lng]);
-    }
+  function handleCopyCode(teamId: number, code: string) {
+    if (!code) return;
+    navigator.clipboard.writeText(code);
+    setCopiedCodeTeamId(teamId);
+    setTimeout(() => setCopiedCodeTeamId(null), 2000);
   }
 
   // Send Radio Nudge
@@ -320,39 +311,34 @@ export default function AdminMap() {
   }
 
   return (
-    <div className="relative w-full h-[calc(100vh-4rem)] bg-zinc-950 text-zinc-100 flex overflow-hidden select-none">
+    <div className="relative w-full h-[calc(100vh-3.5rem)] md:h-screen bg-zinc-950 text-zinc-100 flex overflow-hidden select-none">
       {/* =========================================================================
-          MAIN INTERACTIVE SATELLITE MAP VIEWPORT
+          FULL-SCREEN INTERACTIVE SATELLITE MAP (NO BLOCKING ROSTER DRAWER)
           ========================================================================= */}
-      <div className="relative flex-1 h-full w-full">
-        {/* Floating Top Controls Overlay */}
-        <div className="absolute top-3 inset-x-3 z-[1000] flex items-center justify-between gap-2 pointer-events-none">
-          {/* Left: Summary Badge */}
+      <div className="relative h-full w-full">
+        {/* Floating Top Minimal Bar */}
+        <div className="absolute top-3 inset-x-3 z-[1000] flex flex-wrap items-center justify-between gap-2 pointer-events-none">
+          {/* Left: Tactical Badge */}
           <div className="pointer-events-auto flex items-center gap-2">
-            <div className="bg-zinc-950/90 backdrop-blur-xl border border-zinc-800 px-3.5 py-2 rounded-2xl shadow-2xl flex items-center gap-3">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse" />
-                <span className="text-xs font-mono font-bold text-white uppercase tracking-wider">
-                  Live Field Radar
-                </span>
-              </div>
-              <div className="text-[11px] font-mono text-zinc-400 border-l border-zinc-800 pl-3 flex items-center gap-2">
-                <span>Mapped:</span>
-                <strong className="text-cyan-300 font-bold">
-                  {mappedTeams.length} / {teams.length} Squads
-                </strong>
-              </div>
+            <div className="bg-zinc-950/90 backdrop-blur-md border border-zinc-800 px-3 py-1.5 rounded-xl shadow-xl flex items-center gap-2.5">
+              <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+              <span className="text-xs font-mono font-bold text-white tracking-wider">
+                FIELD RADAR
+              </span>
+              <span className="text-[11px] font-mono text-zinc-400 border-l border-zinc-800 pl-2.5">
+                <strong className="text-cyan-300 font-bold">{mappedTeams.length}</strong> / {teams.length} Live
+              </span>
             </div>
 
             {game && (
-              <div className="bg-zinc-950/90 backdrop-blur-xl border border-zinc-800 px-2.5 py-1.5 rounded-2xl shadow-2xl flex items-center gap-2">
+              <div className="bg-zinc-950/90 backdrop-blur-md border border-zinc-800 px-2.5 py-1.5 rounded-xl shadow-xl flex items-center gap-2">
                 <span
-                  className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wide border ${
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold uppercase ${
                     game.status === 'running'
-                      ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                      ? 'bg-emerald-500/15 text-emerald-400'
                       : game.status === 'paused'
-                      ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
-                      : 'bg-zinc-800 text-zinc-400 border-zinc-700'
+                      ? 'bg-amber-500/15 text-amber-300'
+                      : 'bg-zinc-800 text-zinc-400'
                   }`}
                 >
                   {game.status}
@@ -368,8 +354,7 @@ export default function AdminMap() {
                         alert(err.message ?? 'Pause failed');
                       }
                     }}
-                    className="px-2 py-0.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/40 text-amber-300 font-mono text-[10px] font-bold border border-amber-500/40 transition-all active:scale-95"
-                    title="Pause game timers"
+                    className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-mono text-[10px] font-bold border border-amber-500/30 transition-all active:scale-95"
                   >
                     ⏸ Pause
                   </button>
@@ -385,8 +370,7 @@ export default function AdminMap() {
                         alert(err.message ?? 'Resume failed');
                       }
                     }}
-                    className="px-2 py-0.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-mono text-[10px] font-black transition-all active:scale-95"
-                    title="Resume game timers"
+                    className="px-2 py-0.5 rounded bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-mono text-[10px] font-black transition-all active:scale-95"
                   >
                     ▶ Resume
                   </button>
@@ -395,10 +379,10 @@ export default function AdminMap() {
             )}
           </div>
 
-          {/* Right: Layer Switcher & Viewport Actions */}
-          <div className="pointer-events-auto flex items-center gap-2">
+          {/* Right: Map Actions */}
+          <div className="pointer-events-auto flex items-center gap-1.5">
             {/* Satellite Source Switcher */}
-            <div className="bg-zinc-950/90 backdrop-blur-xl border border-zinc-800 px-2.5 py-1.5 rounded-2xl shadow-2xl">
+            <div className="bg-zinc-950/90 backdrop-blur-md border border-zinc-800 px-2 py-1 rounded-xl shadow-xl">
               <select
                 value={selectedSourceKey}
                 onChange={(e) => setSelectedSourceKey(e.target.value)}
@@ -406,7 +390,7 @@ export default function AdminMap() {
               >
                 <option value="google" className="bg-zinc-900 text-white">Google Satellite</option>
                 <option value="google_hybrid" className="bg-zinc-900 text-white">Hybrid (Sat + Roads)</option>
-                <option value="esri" className="bg-zinc-900 text-white">Esri Imagery</option>
+                <option value="esri" className="bg-zinc-900 text-white">Esri World</option>
                 <option value="osm" className="bg-zinc-900 text-white">Street Map</option>
               </select>
             </div>
@@ -414,28 +398,20 @@ export default function AdminMap() {
             {/* Fit All Squads */}
             <button
               onClick={handleFitAllSquads}
-              className="px-3 py-2 rounded-2xl bg-zinc-950/90 backdrop-blur-xl border border-zinc-800 hover:border-zinc-700 text-xs font-mono text-zinc-300 hover:text-white shadow-2xl active:scale-95 transition-all flex items-center gap-1.5"
+              className="px-2.5 py-1.5 rounded-xl bg-zinc-950/90 backdrop-blur-md border border-zinc-800 hover:border-zinc-700 text-xs font-mono text-zinc-300 hover:text-white shadow-xl active:scale-95 transition-all flex items-center gap-1"
               title="Fit all tracked squads in view"
             >
               <span>🎯</span>
-              <span>Fit Squads</span>
+              <span>Fit</span>
             </button>
 
-            {/* Reset SDMCET Campus Center */}
+            {/* Center SDMCET Campus */}
             <button
               onClick={() => setFocusCoords(SDMCET_CENTER)}
-              className="px-3 py-2 rounded-2xl bg-zinc-950/90 backdrop-blur-xl border border-zinc-800 hover:border-zinc-700 text-xs font-mono text-zinc-300 hover:text-white shadow-2xl active:scale-95 transition-all"
+              className="px-2.5 py-1.5 rounded-xl bg-zinc-950/90 backdrop-blur-md border border-zinc-800 hover:border-zinc-700 text-xs font-mono text-zinc-300 hover:text-white shadow-xl active:scale-95 transition-all"
               title="Reset to Campus Center"
             >
-              Center SDMCET
-            </button>
-
-            {/* Toggle Drawer Button */}
-            <button
-              onClick={() => setShowRosterDrawer((prev) => !prev)}
-              className="px-3 py-2 rounded-2xl bg-zinc-950/90 backdrop-blur-xl border border-zinc-800 hover:border-zinc-700 text-xs font-mono text-cyan-300 hover:text-white shadow-2xl active:scale-95 transition-all flex items-center gap-1.5"
-            >
-              <span>{showRosterDrawer ? 'Hide Roster ✕' : 'Show Roster 📋'}</span>
+              Center
             </button>
           </div>
         </div>
@@ -475,7 +451,7 @@ export default function AdminMap() {
             }}
           />
 
-          {/* Campus Map Blueprint Overlay if present */}
+          {/* Blueprint Overlay if uploaded */}
           {game?.campusMapUrl && campusBounds && (
             <ImageOverlay url={game.campusMapUrl} bounds={campusBounds} opacity={0.7} />
           )}
@@ -504,7 +480,7 @@ export default function AdminMap() {
                     <div className="p-2 font-mono text-xs">
                       <p className="font-bold text-white">{zone.label || (isRestricted ? 'Restricted Zone' : 'Boundary')}</p>
                       {isRestricted && (
-                        <p className="text-rose-400 mt-1">Hazard Penalty: +{zone.penaltyMins} mins</p>
+                        <p className="text-rose-400 mt-0.5">Penalty: +{zone.penaltyMins}m</p>
                       )}
                     </div>
                   </Popup>
@@ -515,7 +491,7 @@ export default function AdminMap() {
             }
           })}
 
-          {/* Landmark Clue Locations (Pins across campus) */}
+          {/* Landmark Clue Locations */}
           {levels.map((lvl) => {
             if (lvl.targetLat == null || lvl.targetLng == null) return null;
             return (
@@ -535,16 +511,15 @@ export default function AdminMap() {
                   icon={createLandmarkIcon(lvl.orderIndex, lvl.isFinal)}
                 >
                   <Popup className="custom-admin-popup">
-                    <div className="p-2.5 font-mono text-xs max-w-xs">
+                    <div className="p-2 font-mono text-xs max-w-xs">
                       <div className="flex items-center gap-1.5 text-zinc-400 text-[10px] uppercase font-bold">
                         <span>Station #{lvl.orderIndex}</span>
-                        {lvl.isFinal && <span className="text-purple-400">• GRAND FINALE</span>}
+                        {lvl.isFinal && <span className="text-purple-400">• FINALE</span>}
                       </div>
-                      <h4 className="font-bold text-white text-sm mt-0.5">{lvl.title}</h4>
-                      <p className="text-zinc-300 mt-1 text-[11px] leading-relaxed">{lvl.locationHint}</p>
-                      <p className="text-zinc-500 mt-1 text-[10px]">
-                        Trigger Radius: {lvl.triggerRadiusMeters ?? 20}m
-                      </p>
+                      <h4 className="font-bold text-white text-xs mt-0.5">{lvl.title}</h4>
+                      {lvl.locationHint && (
+                        <p className="text-zinc-300 mt-0.5 text-[11px]">{lvl.locationHint}</p>
+                      )}
                     </div>
                   </Popup>
                 </Marker>
@@ -562,359 +537,197 @@ export default function AdminMap() {
                 position={[team.lat, team.lng]}
                 icon={createTeamMarkerIcon(team.name, team.id, team.isFinished, isSelected)}
                 eventHandlers={{
-                  click: () => setSelectedTeamId(team.id),
+                  click: () => {
+                    setSelectedTeamId(team.id);
+                  },
+                  mouseover: () => {
+                    setHoveredTeamId(team.id);
+                  },
+                  mouseout: () => {
+                    setHoveredTeamId(null);
+                  },
                 }}
               >
-                <Popup className="custom-admin-popup">
-                  <div className="p-3 font-mono text-xs max-w-xs flex flex-col gap-2">
-                    <div className="flex items-center justify-between border-b border-zinc-800 pb-1.5">
-                      <span className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider">
-                        SQUAD #{team.id}
-                      </span>
-                      {team.isFinished && (
-                        <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 text-[10px] font-bold">
-                          FINISHED
-                        </span>
-                      )}
+                <Tooltip direction="top" offset={[0, -20]} opacity={0.95}>
+                  <div className="p-1 font-mono text-xs text-white">
+                    <div className="font-bold text-cyan-300">{team.name}</div>
+                    <div className="text-[10px] text-zinc-300">
+                      {team.isFinished ? 'Finished 🏁' : `Step ${team.currentStep}/10`}
                     </div>
-
-                    <div>
-                      <h4 className="font-black text-white text-sm">{team.name}</h4>
-                      {team.leaderName && (
-                        <p className="text-zinc-400 text-[11px]">Leader: {team.leaderName}</p>
-                      )}
-                      <div className="flex items-center gap-1.5 mt-1 font-mono text-[11px]">
-                        <span className="text-zinc-400">Access Code:</span>
-                        <span className="font-bold text-cyan-300 bg-cyan-950/80 px-1.5 py-0.5 rounded border border-cyan-500/30">
-                          {team.displayCode || '••••••'}
-                        </span>
-                        {team.displayCode && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              navigator.clipboard.writeText(team.displayCode);
-                              alert(`Copied access code "${team.displayCode}" to clipboard!`);
-                            }}
-                            className="text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-1.5 py-0.5 rounded transition-all"
-                            title="Copy access code"
-                          >
-                            📋 Copy
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="bg-zinc-900/80 rounded-lg p-2 border border-zinc-800 text-[11px] flex flex-col gap-1">
-                      <div className="flex justify-between">
-                        <span className="text-zinc-400">Current Progress:</span>
-                        <strong className="text-white">Step {team.currentStep} / 10</strong>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-zinc-400">Target Station:</span>
-                        <span className="text-zinc-200 font-semibold truncate max-w-[140px]">
-                          {team.activeLevelTitle}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-zinc-400">Last Telemetry:</span>
-                        <span className="text-zinc-300">
-                          {team.recordedAt
-                            ? new Date(team.recordedAt).toLocaleTimeString()
-                            : 'Live'}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Action buttons inside popup */}
-                    <div className="flex items-center gap-1.5 pt-1">
-                      <a
-                        href={`https://www.google.com/maps/search/?api=1&query=${team.lat},${team.lng}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex-1 py-1.5 px-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-center text-zinc-200 text-[10px] font-bold transition-all flex items-center justify-center gap-1"
-                      >
-                        <span>🗺️</span>
-                        <span>Google Maps</span>
-                      </a>
-                      <button
-                        onClick={() => setNudgeTeam(team)}
-                        className="flex-1 py-1.5 px-2 rounded-lg bg-cyan-950 hover:bg-cyan-900 border border-cyan-500/30 text-cyan-300 text-[10px] font-bold transition-all flex items-center justify-center gap-1"
-                      >
-                        <span>📡</span>
-                        <span>Radio Nudge</span>
-                      </button>
-                    </div>
-
-                    {!team.isFinished && (
-                      <div className="flex items-center gap-1.5 pt-1 border-t border-zinc-800/80">
-                        <button
-                          onClick={async () => {
-                            try {
-                              const res = await api.bypassTeamGps(team.id);
-                              alert(`GPS Bypassed! Clue "${res.levelTitle ?? 'Clue'}" decrypted for ${team.name}.`);
-                              reloadTeams();
-                            } catch (err: any) {
-                              alert(err.message ?? 'Failed to bypass GPS');
-                            }
-                          }}
-                          className="flex-1 py-1 px-1.5 rounded-lg bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-500/40 text-emerald-300 text-[10px] font-bold transition-all flex items-center justify-center gap-1"
-                          title="Bypass GPS check & decrypt clue text on squad's phone"
-                        >
-                          <span>🔓</span>
-                          <span>Bypass GPS</span>
-                        </button>
-                        <button
-                          onClick={async () => {
-                            try {
-                              const res = await api.forceAdvanceTeam(team.id);
-                              alert(`Force advanced ${team.name} to Stage ${res.nextStepNumber ?? 'Next'}!`);
-                              reloadTeams();
-                            } catch (err: any) {
-                              alert(err.message ?? 'Failed to advance stage');
-                            }
-                          }}
-                          className="flex-1 py-1 px-1.5 rounded-lg bg-cyan-950/60 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300 text-[10px] font-bold transition-all flex items-center justify-center gap-1"
-                          title="Force complete current level and advance squad to next clue"
-                        >
-                          <span>⏩</span>
-                          <span>Advance ➔</span>
-                        </button>
-                      </div>
-                    )}
                   </div>
-                </Popup>
+                </Tooltip>
               </Marker>
             );
           })}
         </MapContainer>
-      </div>
 
-      {/* =========================================================================
-          RIGHT-SIDE FLOATING SQUAD ROSTER DRAWER
-          ========================================================================= */}
-      {showRosterDrawer && (
-        <div className="w-80 md:w-96 bg-zinc-950/95 backdrop-blur-2xl border-l border-zinc-800 flex flex-col h-full shadow-2xl z-[1050]">
-          {/* Drawer Header */}
-          <div className="p-4 border-b border-zinc-800 flex flex-col gap-3">
-            <div className="flex items-center justify-between">
+        {/* =========================================================================
+            FLOATING SQUAD DETAIL CARD (SHOWN ONLY WHEN TEAM IS HOVERED OR CLICKED)
+            ========================================================================= */}
+        {activeFocusTeam && (
+          <div className="absolute bottom-5 left-4 right-4 md:right-auto md:w-96 z-[1000] bg-zinc-950/95 backdrop-blur-xl border border-zinc-800 rounded-2xl p-4 shadow-2xl flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-2 duration-200">
+            {/* Header */}
+            <div className="flex items-start justify-between gap-2 border-b border-zinc-800 pb-2">
               <div>
-                <h3 className="font-bold text-white text-sm font-mono tracking-tight flex items-center gap-2">
-                  <span>Squad Telemetry</span>
-                  <span className="text-[10px] bg-zinc-800 px-2 py-0.5 rounded-full text-zinc-300">
-                    {filteredTeams.length}
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono font-bold text-cyan-400 uppercase">
+                    Squad #{activeFocusTeam.id}
                   </span>
-                </h3>
-                <p className="text-[11px] text-zinc-400 font-mono mt-0.5">Click any squad to center radar</p>
+                  {activeFocusTeam.isFinished ? (
+                    <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 text-[9px] font-bold font-mono">
+                      FINISHED 🏁
+                    </span>
+                  ) : (
+                    <span className="px-1.5 py-0.2 rounded bg-cyan-950/60 text-cyan-300 border border-cyan-500/30 text-[9px] font-bold font-mono">
+                      Step {activeFocusTeam.currentStep} / 10
+                    </span>
+                  )}
+                </div>
+                <h3 className="font-bold text-white text-base mt-0.5">{activeFocusTeam.name}</h3>
+                {activeFocusTeam.leaderName && (
+                  <p className="text-[11px] text-zinc-400 font-mono">Leader: {activeFocusTeam.leaderName}</p>
+                )}
               </div>
-              <button
-                onClick={() => setShowRosterDrawer(false)}
-                className="w-7 h-7 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-white flex items-center justify-center text-xs font-mono transition-all"
-              >
-                ✕
-              </button>
+
+              {selectedTeamId && (
+                <button
+                  onClick={() => setSelectedTeamId(null)}
+                  className="w-6 h-6 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white flex items-center justify-center text-xs font-mono transition-all"
+                  title="Close squad card"
+                >
+                  ✕
+                </button>
+              )}
             </div>
 
-            {/* Filter Pills */}
-            <div className="flex items-center gap-1 bg-zinc-900 p-1 rounded-xl border border-zinc-800 text-xs font-mono">
-              <button
-                onClick={() => setFilter('all')}
-                className={`flex-1 py-1 rounded-lg transition-all ${
-                  filter === 'all' ? 'bg-zinc-800 text-white font-bold' : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                All ({teams.length})
-              </button>
-              <button
-                onClick={() => setFilter('active')}
-                className={`flex-1 py-1 rounded-lg transition-all ${
-                  filter === 'active' ? 'bg-zinc-800 text-white font-bold' : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                Racing
-              </button>
-              <button
-                onClick={() => setFilter('finished')}
-                className={`flex-1 py-1 rounded-lg transition-all ${
-                  filter === 'finished' ? 'bg-zinc-800 text-white font-bold' : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                Done
-              </button>
+            {/* Target Landmark & Access Code */}
+            <div className="grid grid-cols-2 gap-2 text-xs font-mono bg-zinc-900/60 p-2.5 rounded-xl border border-zinc-800/80">
+              <div>
+                <span className="text-[9px] text-zinc-500 uppercase block">Current Target</span>
+                <span className="text-zinc-200 font-bold truncate block mt-0.5">
+                  {activeFocusTeam.activeLevelTitle}
+                </span>
+              </div>
+              <div>
+                <span className="text-[9px] text-zinc-500 uppercase block">Access Code</span>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <code className="text-amber-300 font-bold bg-zinc-950 px-1.5 py-0.5 rounded border border-zinc-800">
+                    {activeFocusTeam.displayCode || '••••••'}
+                  </code>
+                  {activeFocusTeam.displayCode && (
+                    <button
+                      type="button"
+                      onClick={() => handleCopyCode(activeFocusTeam.id, activeFocusTeam.displayCode)}
+                      className="text-[10px] text-zinc-400 hover:text-white px-1.5 py-0.5 rounded bg-zinc-800"
+                    >
+                      {copiedCodeTeamId === activeFocusTeam.id ? '✓' : 'Copy'}
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
 
-            {/* Search Input */}
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search squads by call-sign…"
-              className="w-full px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 text-xs font-mono text-white placeholder-zinc-500 focus:outline-none focus:border-cyan-400 transition-all"
-            />
-          </div>
-
-          {/* Squad Cards Scrollable List */}
-          <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
-            {filteredTeams.length === 0 ? (
-              <div className="text-center py-10 text-zinc-500 font-mono text-xs">
-                No matching squads located.
-              </div>
-            ) : (
-              filteredTeams.map((team) => {
-                const isSelected = selectedTeamId === team.id;
-                const hasLocation = team.hasLocation;
-
-                return (
-                  <div
-                    key={team.id}
-                    onClick={() => handleSelectSquad(team)}
-                    className={`p-3 rounded-2xl border text-xs font-mono cursor-pointer transition-all ${
-                      isSelected
-                        ? 'bg-cyan-950/30 border-cyan-400 shadow-lg'
-                        : 'bg-zinc-900/60 border-zinc-800/80 hover:border-zinc-700'
-                    }`}
+            {/* Quick Actions */}
+            <div className="flex items-center gap-1.5 pt-1">
+              <a
+                href={`https://www.google.com/maps/search/?api=1&query=${activeFocusTeam.lat},${activeFocusTeam.lng}`}
+                target="_blank"
+                rel="noreferrer"
+                className="flex-1 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-center text-zinc-200 text-[11px] font-mono font-medium transition-all"
+              >
+                Maps ↗
+              </a>
+              <button
+                onClick={() => setNudgeTeam(activeFocusTeam)}
+                className="flex-1 py-1.5 rounded-lg bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 border border-cyan-500/30 text-[11px] font-mono font-bold transition-all"
+              >
+                Nudge
+              </button>
+              {!activeFocusTeam.isFinished && (
+                <>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const res = await api.bypassTeamGps(activeFocusTeam.id);
+                        alert(`GPS bypassed! Clue "${res.levelTitle ?? 'Target'}" unlocked for ${activeFocusTeam.name}.`);
+                        reloadTeams();
+                      } catch (err: any) {
+                        alert(err.message ?? 'Bypass failed');
+                      }
+                    }}
+                    className="flex-1 py-1.5 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/30 text-[11px] font-mono font-bold transition-all"
+                    title="Bypass GPS requirement"
                   >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2 truncate">
-                        <span
-                          className="w-2.5 h-2.5 rounded-full shrink-0"
-                          style={{ backgroundColor: getTeamColor(team.id) }}
-                        />
-                        <span className="font-bold text-white truncate">{team.name}</span>
-                      </div>
-
-                      <div className="flex items-center gap-1 shrink-0">
-                        {team.isFinished ? (
-                          <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-1.5 py-0.5 rounded font-bold">
-                            FINISHED
-                          </span>
-                        ) : (
-                          <span className="text-[10px] bg-zinc-800 text-zinc-300 px-1.5 py-0.5 rounded">
-                            Step {team.currentStep}/10
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="mt-2 text-[11px] text-zinc-400 flex items-center justify-between border-t border-white/5 pt-1.5">
-                      <span className="truncate max-w-[150px]">{team.activeLevelTitle}</span>
-                      <div className="flex items-center gap-1 font-mono text-[10px]">
-                        <span className="text-zinc-500">Code:</span>
-                        <span className="text-cyan-300 font-bold bg-cyan-950/70 px-1 py-0.5 rounded border border-cyan-500/30">
-                          {team.displayCode || '••••••'}
-                        </span>
-                        <span className={hasLocation ? 'text-emerald-400 text-[10px] ml-1' : 'text-zinc-600 text-[10px] ml-1'}>
-                          {hasLocation ? '●' : '○'}
-                        </span>
-                      </div>
-                    </div>
-
-                    {isSelected && !team.isFinished && (
-                      <div
-                        className="mt-2 pt-2 border-t border-zinc-800 flex items-center gap-1.5"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <button
-                          onClick={async () => {
-                            try {
-                              const res = await api.bypassTeamGps(team.id);
-                              alert(`GPS Bypassed! Clue "${res.levelTitle ?? 'Clue'}" decrypted for ${team.name}.`);
-                              reloadTeams();
-                            } catch (err: any) {
-                              alert(err.message ?? 'Failed to bypass GPS');
-                            }
-                          }}
-                          className="flex-1 py-1 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold transition-all active:scale-95"
-                          title="Bypass GPS and decrypt clue text on squad's phone"
-                        >
-                          🔓 Bypass GPS
-                        </button>
-                        <button
-                          onClick={async () => {
-                            try {
-                              const res = await api.forceAdvanceTeam(team.id);
-                              alert(`Force advanced ${team.name} to Stage ${res.nextStepNumber ?? 'Next'}!`);
-                              reloadTeams();
-                            } catch (err: any) {
-                              alert(err.message ?? 'Failed to advance stage');
-                            }
-                          }}
-                          className="flex-1 py-1 rounded bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 text-[10px] font-bold transition-all active:scale-95"
-                          title="Force complete current level and advance squad to next clue"
-                        >
-                          ⏩ Advance ➔
-                        </button>
-                        <button
-                          onClick={() => setNudgeTeam(team)}
-                          className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[10px] border border-zinc-700"
-                          title="Send Radio Nudge"
-                        >
-                          📡
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })
-            )}
+                    Bypass GPS
+                  </button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const res = await api.forceAdvanceTeam(activeFocusTeam.id);
+                        alert(`Advanced ${activeFocusTeam.name} to Step ${res.nextStepNumber ?? 'Next'}!`);
+                        reloadTeams();
+                      } catch (err: any) {
+                        alert(err.message ?? 'Advance failed');
+                      }
+                    }}
+                    className="flex-1 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-100 text-[11px] font-mono font-bold transition-all"
+                    title="Advance to next stage"
+                  >
+                    Advance ➔
+                  </button>
+                </>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* =========================================================================
-          RADIO NUDGE MODAL
-          ========================================================================= */}
-      {nudgeTeam && (
-        <div className="fixed inset-0 z-[1300] bg-zinc-950/80 backdrop-blur-md flex items-center justify-center p-4">
-          <form
-            onSubmit={handleSendNudge}
-            className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 max-w-sm w-full shadow-2xl flex flex-col gap-4 font-mono text-xs"
-          >
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
-              <span className="font-bold text-white text-sm flex items-center gap-1.5">
-                <span>📡</span>
-                <span>Radio Nudge to {nudgeTeam.name}</span>
-              </span>
-              <button
-                type="button"
-                onClick={() => setNudgeTeam(null)}
-                className="text-zinc-400 hover:text-white"
-              >
-                ✕
-              </button>
-            </div>
+        {/* Nudge Modal */}
+        {nudgeTeam && (
+          <div className="fixed inset-0 z-[1200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 max-w-md w-full shadow-2xl flex flex-col gap-4">
+              <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+                <h3 className="font-bold text-white text-sm font-mono">
+                  Send Nudge to {nudgeTeam.name}
+                </h3>
+                <button
+                  onClick={() => setNudgeTeam(null)}
+                  className="text-zinc-400 hover:text-white font-mono text-xs"
+                >
+                  ✕
+                </button>
+              </div>
 
-            <div>
-              <label className="text-[10px] text-zinc-400 uppercase tracking-wider block mb-1">
-                Field Directive Message:
-              </label>
-              <textarea
-                value={nudgeMessage}
-                onChange={(e) => setNudgeMessage(e.target.value)}
-                placeholder="e.g. Check the stairs on the east side..."
-                rows={3}
-                className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-700 text-white placeholder-zinc-500 focus:outline-none focus:border-cyan-400 transition-all resize-none"
-              />
-            </div>
+              <form onSubmit={handleSendNudge} className="flex flex-col gap-3">
+                <input
+                  type="text"
+                  value={nudgeMessage}
+                  onChange={(e) => setNudgeMessage(e.target.value)}
+                  placeholder="Enter message for team phone…"
+                  required
+                  className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-xs text-white focus:outline-none focus:border-cyan-400 font-mono"
+                />
 
-            <div className="flex items-center gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => setNudgeTeam(null)}
-                className="flex-1 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-semibold"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={isSendingNudge || !nudgeMessage.trim()}
-                className="flex-1 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold disabled:opacity-50"
-              >
-                {isSendingNudge ? 'Transmitting…' : 'Transmit'}
-              </button>
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNudgeTeam(null)}
+                    className="px-3 py-1.5 rounded-lg bg-zinc-800 text-xs font-mono text-zinc-300"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSendingNudge}
+                    className="px-4 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-zinc-950 font-bold text-xs font-mono transition-all"
+                  >
+                    {isSendingNudge ? 'Transmitting…' : 'Transmit'}
+                  </button>
+                </div>
+              </form>
             </div>
-          </form>
-        </div>
-      )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
