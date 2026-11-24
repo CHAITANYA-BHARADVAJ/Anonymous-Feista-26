@@ -17,25 +17,29 @@ export default function ClueDropModal({
   onClose,
 }: ClueDropModalProps) {
   return (
-    <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/85 backdrop-blur-2xl animate-fade-in font-sans">
-      <div className="bg-[#0c0e14] border border-white/[0.12] rounded-3xl p-6 max-w-sm w-full shadow-2xl relative overflow-hidden flex flex-col gap-4">
-        {/* Subtle grid pattern */}
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/85 backdrop-blur-2xl animate-fade-in font-sans"
+    >
+      <div className="obsidian-surface rounded-3xl p-6 max-w-sm w-full relative overflow-hidden flex flex-col gap-4 animate-scale-in">
+        {/* Subtle dot grid texture */}
         <div className="absolute inset-0 bg-[radial-gradient(#ffffff08_1px,transparent_1px)] [background-size:16px_16px] pointer-events-none" />
 
         <div className="flex items-center justify-between border-b border-white/[0.06] pb-3 relative z-10">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-emerald-500/15 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-xl bg-emerald-500/15 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0">
               <UnlockIcon className="w-4 h-4" />
             </div>
-            <div>
-              <span className="text-[10px] font-mono uppercase tracking-widest text-emerald-400 font-bold">
-                STAGE 0{orderIndex} VERIFIED
+            <div className="min-w-0">
+              <span className="text-[10px] font-mono uppercase tracking-widest text-emerald-400 font-bold block">
+                STAGE {String(orderIndex).padStart(2, '0')} VERIFIED
               </span>
-              <p className="text-xs text-white font-bold">{levelTitle}</p>
+              <p className="text-xs text-white font-bold truncate">{levelTitle}</p>
             </div>
           </div>
 
-          <span className="text-[9px] font-mono tracking-wider uppercase bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 px-2 py-0.5 rounded font-bold">
+          <span className="text-[9px] font-mono tracking-wider uppercase bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 px-2 py-0.5 rounded font-bold shrink-0">
             DECRYPTED
           </span>
         </div>
@@ -62,7 +66,7 @@ export default function ClueDropModal({
 
         <button
           onClick={onClose}
-          className="w-full py-3.5 px-4 bg-white hover:bg-gray-200 active:scale-95 text-gray-950 font-black text-xs uppercase tracking-widest rounded-xl shadow-xl transition-all relative z-10 min-h-[46px]"
+          className="w-full py-3.5 px-4 bg-white hover:bg-zinc-200 active:scale-[0.98] text-zinc-950 font-black text-xs uppercase tracking-widest rounded-xl shadow-xl transition-all relative z-10 min-h-[46px]"
         >
           Engage Objective →
         </button>

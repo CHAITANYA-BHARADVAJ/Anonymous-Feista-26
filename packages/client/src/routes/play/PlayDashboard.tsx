@@ -6,12 +6,21 @@ import 'leaflet/dist/leaflet.css';
 
 import { useGameStore } from '../../stores/gameStore';
 import { useAuthStore } from '../../stores/authStore';
+import { useUiStore } from '../../stores/uiStore';
+import { useVoiceStore } from '../../stores/voiceStore';
 import { useLocation } from '../../hooks/useLocation';
-import { useCountdown, useStopwatch, formatMs } from '../../hooks/useCountdown';
+import { useStopwatch, formatMs } from '../../hooks/useCountdown';
 import { api } from '../../lib/api';
 import { disconnectSocket } from '../../lib/socket';
 import { computeDistanceMeters, computeBearingDegrees } from '../../lib/geo';
 import { playClueUnlockedSound, playSuccessSound, playErrorSound, triggerHaptic } from '../../lib/sound';
+import {
+  announceArenaWelcome,
+  announceClueDecrypted,
+  announceStageAdvance,
+  primeSpeechEngine,
+  stopPaVoice,
+} from '../../lib/voice';
 import QrCodeDisplay from '../../components/QrCodeDisplay';
 import GpsCalibrationModal from '../../components/GpsCalibrationModal';
 import {
@@ -31,7 +40,25 @@ import DistanceRadar from '../../components/DistanceRadar';
 import ClueDropModal from '../../components/ClueDropModal';
 import ZoneWarning from '../../components/ZoneWarning';
 import AnnouncementBanner from '../../components/AnnouncementBanner';
-import { LockIcon, UnlockIcon, RadarIcon } from '../../components/Icons';
+import PaVoiceBanner from '../../components/PaVoiceBanner';
+import {
+  CameraIcon,
+  CheckIcon,
+  ChevronUpIcon,
+  FlagIcon,
+  GlobeIcon,
+  LinkIcon,
+  LockIcon,
+  MaximizeIcon,
+  PauseIcon,
+  RadarIcon,
+  SatelliteIcon,
+  SquidSymbolsIcon,
+  TrophyIcon,
+  VolumeOffIcon,
+  VolumeOnIcon,
+  XIcon,
+} from '../../components/Icons';
 
 // Custom player pin icon
 const playerIcon = L.divIcon({
@@ -85,12 +112,18 @@ export default function PlayDashboard() {
   const game = useGameStore((s) => s.game);
   const currentLevel = useGameStore((s) => s.currentLevel)();
   const progress = useGameStore((s) => s.progress);
+  const rankings = useGameStore((s) => s.rankings);
   const setProgress = useGameStore((s) => s.setProgress);
   const connected = useGameStore((s) => s.connected);
 
   const teamName = useAuthStore((s) => s.teamName);
   const teamId = useAuthStore((s) => s.teamId);
   const clearAuth = useAuthStore((s) => s.clear);
+
+  const toast = useUiStore((s) => s.toast);
+  const uiConfirm = useUiStore((s) => s.confirm);
+  const voiceMuted = useVoiceStore((s) => s.muted);
+  const toggleVoiceMute = useVoiceStore((s) => s.toggleMute);
 
   // Device & Location Hooks
   const { pos, refreshLocation } = useLocation();
@@ -127,12 +160,19 @@ export default function PlayDashboard() {
   const currentStep = (currentLevel as any)?.stepNumber ?? (completedCount + 1);
   const isFinalStep = Boolean(level?.isFinal || currentStep >= 10);
 
+  // Check verified podium finish from live rankings
+  const myRanking = useMemo(
+    () => rankings.find((r) => r.teamId === teamId),
+    [rankings, teamId],
+  );
+  const isVerifiedFinished = Boolean(myRanking?.finished);
+
   const revealedHintIds = useMemo(
     () => new Set(currentLevel?.hintReveals.map((r) => r.hintId) ?? []),
     [currentLevel?.hintReveals],
   );
 
-  // Auto-expand sheet and reset input whenever active level progresses or kickoff happens
+  // Auto-expand sheet and reset input whenever active level progresses
   const prevLevelIdRef = useRef<number | null>(null);
   useEffect(() => {
     if (currentLevel?.levelId && currentLevel.levelId !== prevLevelIdRef.current) {
@@ -143,14 +183,35 @@ export default function PlayDashboard() {
     }
   }, [currentLevel?.levelId]);
 
-  // Fullscreen tracking & auto-engage
+  // Expand sheet when verified finish arrives
+  useEffect(() => {
+    if (isVerifiedFinished) {
+      setIsSheetExpanded(true);
+    }
+  }, [isVerifiedFinished]);
+
+  // Fullscreen tracking & Squid Game PA intro briefing on portal entry
   useEffect(() => {
     const cleanup = enableAutoFullscreenOnFirstGesture();
     const updateFs = () => setFullscreenActive(isFullscreen());
     updateFs();
     document.addEventListener('fullscreenchange', updateFs);
     document.addEventListener('webkitfullscreenchange', updateFs);
+
+    const pendingIntro = sessionStorage.getItem('ch-pa-pending-intro') === '1';
+    const introAlreadyPlayed = sessionStorage.getItem('ch-pa-intro-done') === '1';
+    let introTimer: ReturnType<typeof setTimeout> | null = null;
+
+    if (pendingIntro || !introAlreadyPlayed) {
+      sessionStorage.removeItem('ch-pa-pending-intro');
+      sessionStorage.setItem('ch-pa-intro-done', '1');
+      introTimer = setTimeout(() => {
+        announceArenaWelcome(teamName);
+      }, 450);
+    }
+
     return () => {
+      if (introTimer) clearTimeout(introTimer);
       cleanup();
       document.removeEventListener('fullscreenchange', updateFs);
       document.removeEventListener('webkitfullscreenchange', updateFs);
@@ -169,7 +230,7 @@ export default function PlayDashboard() {
   }, [pos?.latitude, pos?.longitude, targetLat, targetLng]);
 
   // Global Mission Stopwatch & Hint Penalties
-  const { elapsedMs, formatted: elapsedFormatted } = useStopwatch(
+  const { formatted: elapsedFormatted } = useStopwatch(
     game?.startedAt,
     game?.pausedAt,
     game?.totalPausedMs ?? 0,
@@ -195,20 +256,27 @@ export default function PlayDashboard() {
   async function triggerCheckIn() {
     if (!currentLevel || !level || !pos || checkInLoading) return;
     if (game?.status !== 'running') {
-      alert(game?.status === 'paused' ? 'Hunt is temporarily PAUSED by Event Control.' : 'Hunt has concluded.');
+      toast(
+        game?.status === 'paused' ? 'Hunt is temporarily PAUSED by Event Control.' : 'Hunt has concluded.',
+        'warn',
+      );
       return;
     }
     setCheckInLoading(true);
     try {
       await api.reachLocation(level.id, pos.latitude, pos.longitude);
-      playClueUnlockedSound();
+      if (useVoiceStore.getState().muted) {
+        playClueUnlockedSound();
+      } else {
+        announceClueDecrypted(currentStep, level.isFinal);
+      }
       triggerHaptic();
       const updated = await api.getParticipantGame();
       setProgress(updated.progress);
       setShowClueModal(true);
-      setIsSheetExpanded(true); // Open sheet to show decrypted clue
+      setIsSheetExpanded(true);
     } catch (err: any) {
-      alert(err.message ?? 'Proximity verification failed. Move closer to the landmark!');
+      toast(err.message ?? 'Proximity verification failed. Move closer to the landmark!', 'error');
     } finally {
       setCheckInLoading(false);
     }
@@ -218,6 +286,7 @@ export default function PlayDashboard() {
   useEffect(() => {
     if (
       !locationReached &&
+      !isVerifiedFinished &&
       distanceMeters !== null &&
       distanceMeters <= triggerRadius + 5 &&
       pos &&
@@ -225,14 +294,18 @@ export default function PlayDashboard() {
     ) {
       triggerCheckIn();
     }
-  }, [distanceMeters, locationReached, triggerRadius, pos]);
+  }, [distanceMeters, locationReached, isVerifiedFinished, triggerRadius, pos]);
 
   // Submit Answer Solution
   async function submitAnswer(e: React.FormEvent) {
     e.preventDefault();
     if (!currentLevel || !level) return;
     if (game?.status !== 'running') {
-      setAnswerError(game?.status === 'paused' ? 'Hunt is temporarily PAUSED by Event Control.' : 'Hunt has officially concluded.');
+      setAnswerError(
+        game?.status === 'paused'
+          ? 'Hunt is temporarily PAUSED by Event Control.'
+          : 'Hunt has officially concluded.',
+      );
       return;
     }
     setAnswerError('');
@@ -241,8 +314,13 @@ export default function PlayDashboard() {
       const res = await api.submitAnswer(level.id, answer.trim());
       if (res.correct) {
         setAnswer('');
-        playSuccessSound();
+        if (useVoiceStore.getState().muted) {
+          playSuccessSound();
+        } else {
+          announceStageAdvance(res.stepNumber, Boolean(res.stepNumber && res.stepNumber >= 10));
+        }
         triggerHaptic([80, 50, 120]);
+        toast('Passcode verified — advancing to next stage!', 'success');
         const data = await api.getParticipantGame();
         setProgress(data.progress);
         if (res.finished) {
@@ -258,20 +336,28 @@ export default function PlayDashboard() {
     }
   }
 
-  // Reveal Hint
+  // Reveal Hint with custom in-app confirmation
   async function useHint(hint: { id: number; orderIndex: number; penaltyMins: number }) {
     if (!currentLevel || !level || revealedHintIds.has(hint.id)) return;
     if (game?.status !== 'running') {
-      alert(game?.status === 'paused' ? 'Hunt is temporarily PAUSED by Event Control.' : 'Hunt has concluded.');
+      toast(
+        game?.status === 'paused' ? 'Hunt is temporarily PAUSED by Event Control.' : 'Hunt has concluded.',
+        'warn',
+      );
       return;
     }
     const freeHint = currentLevel.hintsUsed < (currentLevel.hintReveals.length - revealedHintIds.size + 1);
     const penalty = freeHint ? 0 : hint.penaltyMins;
-    const msg =
-      penalty > 0
-        ? `REVEAL HINT #${hint.orderIndex}?\nIncurs a +${penalty} minute penalty to official team finish time.`
-        : `REVEAL HINT #${hint.orderIndex}?`;
-    if (!confirm(msg)) return;
+    const confirmed = await uiConfirm({
+      title: `Reveal Tactical Intel #${hint.orderIndex}?`,
+      message:
+        penalty > 0
+          ? `Decrypting this hint incurs a +${penalty} minute penalty added to your official finish time.`
+          : 'No penalty applies for this unlocked hint.',
+      confirmLabel: penalty > 0 ? `Reveal (+${penalty}m)` : 'Reveal Hint',
+      tone: penalty > 0 ? 'amber' : 'default',
+    });
+    if (!confirmed) return;
 
     setHintLoading(hint.orderIndex);
     try {
@@ -279,16 +365,25 @@ export default function PlayDashboard() {
       setRevealedHints((prev) => ({ ...prev, [hint.id]: res.text }));
       const data = await api.getParticipantGame();
       setProgress(data.progress);
+      toast(`Intel #${hint.orderIndex} decrypted.`, 'info');
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message ?? 'Could not reveal hint', 'error');
     } finally {
       setHintLoading(null);
     }
   }
 
-  // Sign out
+  // Sign out with custom in-app confirmation
   async function handleLogout() {
-    if (!confirm('Sign out from this operative terminal?')) return;
+    const confirmed = await uiConfirm({
+      title: 'Sign Out Terminal?',
+      message: `Disconnect squad "${teamName || 'Operative'}" from this device?`,
+      confirmLabel: 'Sign Out',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
+    stopPaVoice();
+    sessionStorage.removeItem('ch-pa-intro-done');
     await api.logout().catch(() => {});
     clearAuth();
     disconnectSocket();
@@ -307,7 +402,7 @@ export default function PlayDashboard() {
   const totalLevels = Math.max(progress.length, 10);
 
   return (
-    <div className="relative w-full h-full min-h-screen bg-zinc-950 text-zinc-100 font-sans overflow-hidden select-none">
+    <div className="relative w-full h-[100dvh] bg-[#07080b] text-zinc-100 font-sans overflow-hidden select-none">
       {/* Precision Signal Indicator Bar (when socket disconnected) */}
       {!connected && (
         <div className="absolute top-0 inset-x-0 z-[1100] bg-amber-500/15 border-b border-amber-500/30 text-amber-300 text-center text-[10px] py-1 px-4 font-mono font-medium flex items-center justify-center gap-2 backdrop-blur-md">
@@ -317,6 +412,7 @@ export default function PlayDashboard() {
       )}
 
       <AnnouncementBanner />
+      <PaVoiceBanner teamName={teamName} />
       <ZoneWarning />
 
       {/* =========================================================================
@@ -326,12 +422,12 @@ export default function PlayDashboard() {
         {/* Left: Squad Profile & Call-Sign Pill */}
         <button
           onClick={() => setShowProfileModal(true)}
-          className="pointer-events-auto bg-zinc-950/85 backdrop-blur-xl border border-zinc-800 hover:border-zinc-700 px-3 py-1.5 rounded-2xl shadow-2xl flex items-center gap-2 active:scale-95 transition-all shrink-0"
+          className="pointer-events-auto obsidian-surface hover:border-white/20 px-3 py-1.5 rounded-2xl flex items-center gap-2 active:scale-95 transition-all shrink-0"
           title="Squad Operative Dossier"
         >
           <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
           <div className="flex flex-col text-left">
-            <span className="text-[10px] font-mono uppercase tracking-widest text-zinc-400 font-bold leading-tight">
+            <span className="text-[10px] font-mono uppercase tracking-widest text-zinc-400 font-bold leading-tight tabular-nums">
               SQUAD #{teamId ?? '01'}
             </span>
             <span className="text-xs font-mono font-black text-white tracking-tight truncate max-w-[110px]">
@@ -340,17 +436,16 @@ export default function PlayDashboard() {
           </div>
         </button>
 
-        {/* Center: EMPTY safe zone to avoid phone selfie camera punch-holes and notches */}
+        {/* Center: Safe gap for notch / selfie camera punch-holes */}
         <div className="flex-1" />
 
-        {/* Right: Tactical Tools + Mission Stopwatch (relocated to avoid camera overlap) */}
+        {/* Right: Tactical Tools + Mission Stopwatch */}
         <div className="pointer-events-auto flex items-center gap-1.5 shrink-0">
-          {/* Mission Stopwatch (Counts UP from 00:00:00) */}
           {game?.startedAt && (
-            <div className="bg-zinc-950/85 backdrop-blur-xl border border-zinc-800 px-2.5 py-1.5 rounded-2xl shadow-2xl flex items-center gap-1.5">
-              <div className="flex items-center gap-1">
-                <span className={`w-1.5 h-1.5 rounded-full ${game.status === 'paused' ? 'bg-amber-400' : 'bg-emerald-400 animate-pulse'}`} />
-                <span className="text-[9px] font-mono text-zinc-400 uppercase tracking-wider font-bold">
+            <div className="obsidian-surface px-2.5 py-1.5 rounded-2xl flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5">
+                <span className={`w-1.5 h-1.5 rounded-full ${game.status === 'paused' ? 'bg-amber-400' : isVerifiedFinished ? 'bg-cyan-400' : 'bg-emerald-400 animate-pulse'}`} />
+                <span className="text-[9px] font-mono text-zinc-400 uppercase tracking-wider font-bold hidden sm:inline">
                   {game.status === 'paused' ? 'PAUSED' : 'TIME'}
                 </span>
                 <span className="text-xs font-mono font-black tabular-nums tracking-tight text-white">
@@ -359,7 +454,7 @@ export default function PlayDashboard() {
               </div>
               {totalHintPenaltiesMins > 0 && (
                 <span
-                  className="text-[9px] font-mono bg-amber-500/15 border border-amber-500/30 text-amber-300 px-1 py-0.5 rounded-md font-bold"
+                  className="text-[9px] font-mono bg-amber-500/15 border border-amber-500/30 text-amber-300 px-1 py-0.5 rounded-md font-bold tabular-nums"
                   title="Hint Penalty Time added to finish score"
                 >
                   +{totalHintPenaltiesMins}m
@@ -368,21 +463,47 @@ export default function PlayDashboard() {
             </div>
           )}
 
+          {/* PA Voice Comms Mute/Unmute Toggle */}
+          <button
+            onClick={() => {
+              if (voiceMuted) {
+                toggleVoiceMute();
+                primeSpeechEngine();
+                toast('Arena PA Voice Announcements enabled.', 'info');
+              } else {
+                stopPaVoice();
+                toggleVoiceMute();
+                toast('Arena PA Voice muted.', 'info');
+              }
+            }}
+            className={`w-8 h-8 rounded-2xl obsidian-surface flex items-center justify-center active:scale-95 transition-all ${
+              voiceMuted
+                ? 'text-zinc-500 hover:text-zinc-300'
+                : 'text-rose-400 border-rose-500/35 hover:border-rose-400/60'
+            }`}
+            title={voiceMuted ? 'Enable Arena PA Voice' : 'Mute Arena PA Voice'}
+            aria-label={voiceMuted ? 'Unmute PA voice announcements' : 'Mute PA voice announcements'}
+          >
+            {voiceMuted ? <VolumeOffIcon className="w-4 h-4" /> : <VolumeOnIcon className="w-4 h-4" />}
+          </button>
+
           {/* GPS Calibration & Sensor Diagnostic Tool */}
           <button
             onClick={() => setShowGpsModal(true)}
-            className="w-8 h-8 rounded-2xl bg-zinc-950/85 backdrop-blur-xl border border-zinc-800 hover:border-cyan-400/50 flex items-center justify-center text-cyan-300 active:scale-95 transition-all shadow-2xl text-xs"
+            className="w-8 h-8 rounded-2xl obsidian-surface hover:border-cyan-400/50 flex items-center justify-center text-cyan-300 active:scale-95 transition-all"
             title="Calibrate GPS Sensor & Diagnostics"
+            aria-label="Calibrate GPS Sensor"
           >
-            🎯
+            <SatelliteIcon className="w-4 h-4" />
           </button>
 
           {/* Satellite Layer Switcher */}
-          <div className="bg-zinc-950/85 backdrop-blur-xl border border-zinc-800 px-2 py-1.5 rounded-2xl shadow-2xl">
+          <div className="obsidian-surface px-2 py-1.5 rounded-2xl">
             <select
               value={selectedSourceKey}
               onChange={(e) => setSelectedSourceKey(e.target.value)}
-              className="bg-transparent text-[10px] font-mono text-zinc-300 border-none outline-none cursor-pointer"
+              aria-label="Satellite Map Source"
+              className="bg-transparent text-[10px] font-mono text-zinc-200 border-none outline-none cursor-pointer"
             >
               <option value="google" className="bg-zinc-900 text-white">Google Sat</option>
               <option value="google_hybrid" className="bg-zinc-900 text-white">Sat + Roads</option>
@@ -393,8 +514,9 @@ export default function PlayDashboard() {
           {/* Re-Center GPS Button */}
           <button
             onClick={refreshLocation}
-            className="w-8 h-8 rounded-2xl bg-zinc-950/85 backdrop-blur-xl border border-zinc-800 hover:border-zinc-700 flex items-center justify-center text-cyan-300 active:scale-95 transition-all shadow-2xl"
+            className="w-8 h-8 rounded-2xl obsidian-surface hover:border-white/25 flex items-center justify-center text-cyan-300 active:scale-95 transition-all"
             title="Recalibrate GPS position"
+            aria-label="Recenter GPS Position"
           >
             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="12" cy="12" r="7" />
@@ -409,27 +531,26 @@ export default function PlayDashboard() {
           {!fullscreenActive && (
             <button
               onClick={() => toggleFullscreen()}
-              className="w-8 h-8 rounded-2xl bg-zinc-950/85 backdrop-blur-xl border border-zinc-800 hover:border-zinc-700 flex items-center justify-center text-zinc-300 active:scale-95 transition-all shadow-2xl"
+              className="w-8 h-8 rounded-2xl obsidian-surface hover:border-white/25 flex items-center justify-center text-zinc-300 active:scale-95 transition-all"
               title="Fullscreen HUD"
+              aria-label="Enter Fullscreen HUD"
             >
-              <span className="text-xs">⛶</span>
+              <MaximizeIcon className="w-4 h-4" />
             </button>
           )}
         </div>
       </div>
 
-      {/* TACTICAL PAUSE / CONCLUSION MISSION OVERLAY FOR SQUADS */}
+      {/* TACTICAL PAUSE / CONCLUSION BANNER FOR SQUADS */}
       {game?.status === 'paused' && (
-        <div className="absolute inset-x-3 top-16 z-[960] max-w-sm mx-auto bg-amber-950/95 border-2 border-amber-500 backdrop-blur-2xl rounded-2xl p-3.5 shadow-2xl flex items-center gap-3 animate-pulse">
-          <span className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-lg shrink-0">
-            ⏸
+        <div className="absolute inset-x-3 top-16 z-[960] max-w-sm mx-auto bg-amber-950/95 border border-amber-500/60 backdrop-blur-2xl rounded-2xl p-3.5 shadow-2xl flex items-center gap-3 animate-slide-down">
+          <span className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-300 shrink-0">
+            <PauseIcon className="w-4 h-4" />
           </span>
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-mono font-black text-amber-300 uppercase tracking-wider">
-                Timers Paused by Command Desk
-              </span>
-            </div>
+            <span className="text-[11px] font-mono font-black text-amber-300 uppercase tracking-wider block">
+              Timers Paused by Command Desk
+            </span>
             <p className="text-[10px] font-mono text-amber-200/90 leading-tight mt-0.5">
               Mission operations temporarily frozen. Stand by at your current landmark.
             </p>
@@ -438,16 +559,14 @@ export default function PlayDashboard() {
       )}
 
       {game?.status === 'ended' && (
-        <div className="absolute inset-x-3 top-16 z-[960] max-w-sm mx-auto bg-zinc-950/95 border-2 border-emerald-500 backdrop-blur-2xl rounded-2xl p-3.5 shadow-2xl flex items-center gap-3">
-          <span className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-lg shrink-0">
-            🏁
+        <div className="absolute inset-x-3 top-16 z-[960] max-w-sm mx-auto bg-[#0c0e14]/95 border border-emerald-500/50 backdrop-blur-2xl rounded-2xl p-3.5 shadow-2xl flex items-center gap-3 animate-slide-down">
+          <span className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-300 shrink-0">
+            <FlagIcon className="w-4 h-4" />
           </span>
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-mono font-black text-emerald-300 uppercase tracking-wider">
-                Campus Hunt Concluded
-              </span>
-            </div>
+            <span className="text-[11px] font-mono font-black text-emerald-300 uppercase tracking-wider block">
+              Campus Hunt Concluded
+            </span>
             <p className="text-[10px] font-mono text-zinc-300 leading-tight mt-0.5">
               All timings locked. Report to the Start Venue for final rankings & ceremony.
             </p>
@@ -559,317 +678,376 @@ export default function PlayDashboard() {
       </div>
 
       {/* =========================================================================
-          FLOATING RADAR & DYNAMIC MOVING DIRECTION ARROW (ABOVE BOTTOM SHEET)
+          DOCKED BOTTOM HUD STACK (RADAR + MISSION SHEET, ZERO OVERLAP)
           ========================================================================= */}
-      {currentLevel && (
-        <div
-          className={`absolute inset-x-3 z-[900] transition-all duration-300 pointer-events-auto max-w-md mx-auto ${
-            isSheetExpanded ? 'bottom-[42%] md:bottom-[46%]' : 'bottom-20'
-          }`}
-        >
-          <div className="bg-zinc-950/90 backdrop-blur-2xl border border-zinc-800 rounded-3xl p-4 shadow-2xl">
-            <DistanceRadar
-              distanceMeters={distanceMeters}
-              triggerRadius={triggerRadius}
-              locationReached={locationReached}
-              bearing={bearingDegrees}
-              accuracy={pos?.accuracy}
-              gpsHeading={pos?.heading}
-              onTriggerCheckIn={triggerCheckIn}
-              isLoading={checkInLoading}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* =========================================================================
-          FLOATING MINIMIZABLE BOTTOM ACTION SHEET (INTEL, HINTS, SOLUTION DECODER)
-          ========================================================================= */}
-      <div
-        className={`absolute inset-x-0 bottom-0 z-[950] bg-zinc-950/95 backdrop-blur-2xl border-t border-zinc-800 transition-all duration-300 flex flex-col max-w-md mx-auto rounded-t-3xl shadow-2xl overflow-hidden ${
-          isSheetExpanded ? 'h-[40%] md:h-[44%]' : 'h-16'
-        }`}
-      >
-        {/* Sheet Top Handle & Toggle Bar */}
-        <div
-          onClick={() => setIsSheetExpanded((prev) => !prev)}
-          className="w-full py-2.5 px-5 flex items-center justify-between cursor-pointer border-b border-zinc-800/80 shrink-0 bg-zinc-900/40 hover:bg-zinc-900/60 transition-colors select-none"
-        >
-          <div className="flex items-center gap-2.5">
-            <span className="text-[10px] font-mono uppercase tracking-widest text-cyan-400 font-bold">
-              {isFinalStep ? 'FINALE 🏁' : `STAGE 0${currentStep} / 10`}
-            </span>
-            <span className="text-xs font-mono font-bold text-white truncate max-w-[180px]">
-              {level?.title ?? (game?.status === 'idle' ? 'Standby for Kickoff' : 'Intelligence Directive')}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {locationReached ? (
-              <span className="text-[9px] font-mono tracking-wider uppercase bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 px-2 py-0.5 rounded-md font-bold">
-                DECRYPTED
-              </span>
-            ) : (
-              <span className="text-[9px] font-mono tracking-wider uppercase bg-amber-500/10 border border-amber-500/30 text-amber-300 px-2 py-0.5 rounded-md font-bold">
-                LOCKED
-              </span>
-            )}
-
-            <button
-              className="text-xs text-zinc-400 hover:text-white px-1.5 py-0.5 rounded transition-transform duration-200"
-              style={{ transform: isSheetExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}
-            >
-              ▲
-            </button>
-          </div>
-        </div>
-
-        {/* Sheet Scrollable Body */}
-        {isSheetExpanded && (
-          <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 flex flex-col gap-4">
-            {/* Standby State when game has not started yet */}
-            {!currentLevel && (
-              <div className="flex-1 py-4 flex flex-col items-center justify-center text-center gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-cyan-950/60 border border-cyan-400/30 flex items-center justify-center text-cyan-400 text-xl animate-pulse shadow-lg">
-                  📡
-                </div>
-                <div>
-                  <span className="text-[10px] font-mono uppercase tracking-widest text-cyan-400 font-bold">
-                    STANDBY // MISSION READY
-                  </span>
-                  <h3 className="text-base font-black text-white mt-1">Awaiting Event Kickoff</h3>
-                  <p className="text-xs text-zinc-400 mt-1 max-w-xs leading-relaxed font-sans">
-                    Squad <strong>{teamName}</strong> is registered. When coordinators initiate the synchronized kickoff, your unique starting landmark will unlock automatically.
-                  </p>
-                </div>
-                <div className="text-[11px] font-mono text-zinc-400 bg-zinc-900 px-3.5 py-1.5 rounded-xl border border-zinc-800 flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>{pos ? `GPS Sensor Calibrated (±${Math.round(pos.accuracy)}m)` : 'Acquiring GPS fix…'}</span>
-                </div>
-              </div>
-            )}
-
-            {/* 1. Clue Intel Box */}
-            {currentLevel && (
-              <>
-                {locationReached ? (
-              <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-4 flex flex-col gap-2">
-                <span className="text-[9px] font-mono uppercase tracking-widest text-cyan-400 font-bold">
-                  CLASSIFIED FIELD BRIEFING
-                </span>
-                <p className="text-xs text-zinc-200 font-normal leading-relaxed">
-                  {level?.clueText}
-                </p>
-              </div>
-            ) : (
-              <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-4 text-center flex flex-col items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-zinc-800/80 border border-zinc-700 flex items-center justify-center text-amber-400">
-                  <LockIcon className="w-4 h-4" />
-                </div>
-                <h3 className="font-bold text-white text-xs uppercase tracking-wider font-mono">
-                  GEOFENCE ENCRYPTION ACTIVE
-                </h3>
-                <p className="text-[11px] text-zinc-400 leading-relaxed max-w-xs">
-                  Physical proximity verification required. Move within {triggerRadius}m of the landmark to decrypt intelligence.
-                </p>
-              </div>
-            )}
-
-            {/* 2. Campus Navigation Guidance */}
-            {level?.locationHint && (
-              <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-3.5 flex flex-col gap-1">
-                <span className="text-[9px] font-mono uppercase tracking-widest text-zinc-400 font-bold">
-                  CAMPUS SECTOR GUIDANCE
-                </span>
-                <p className="text-xs text-zinc-300 font-medium leading-relaxed">
-                  {level.locationHint}
-                </p>
-              </div>
-            )}
-
-            {/* 3. External Dossier Links & Teammate QR Scanner */}
-            {level && level.socialLinks.length > 0 && locationReached && (
-              <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-4 flex flex-col gap-3">
-                <div className="flex items-center justify-between border-b border-zinc-800/80 pb-2">
-                  <span className="text-[9px] font-mono uppercase tracking-widest text-zinc-400 font-bold flex items-center gap-1.5">
-                    <span>🔗</span> EXTERNAL DOSSIER INTEL & SOCIAL RECON
-                  </span>
-                  <span className="text-[10px] font-mono text-cyan-400 font-bold">
-                    {level.socialLinks.length} TARGET {level.socialLinks.length === 1 ? 'LINK' : 'LINKS'}
-                  </span>
-                </div>
-
-                <div className="flex flex-col gap-3">
-                  {level.socialLinks.map((sl, i) => (
-                    <div key={i} className="flex flex-col gap-2.5 p-3.5 bg-zinc-950/70 border border-zinc-800/80 rounded-xl">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-mono font-bold text-white uppercase flex items-center gap-1.5">
-                          <span>🌐</span> {sl.platform}
-                        </span>
-                        <a
-                          href={sl.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-cyan-300 text-[11px] font-mono uppercase transition-all flex items-center gap-1"
-                        >
-                          <span>Open On Device</span>
-                          <span className="text-[10px]">↗</span>
-                        </a>
-                      </div>
-
-                      {/* Inline Scannable QR Code for Teammate Scan */}
-                      <QrCodeDisplay
-                        url={sl.url}
-                        label={`SCAN FOR ${sl.platform.toUpperCase()}`}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* 4. Tactical Assistance Hints */}
-            {!isCompleted && level && level.hints.length > 0 && locationReached && (
-              <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-3.5 flex flex-col gap-2.5">
-                <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
-                  <span className="text-[9px] font-mono uppercase tracking-widest text-zinc-400 font-bold">
-                    TACTICAL ASSISTANCE DECRYPTS
-                  </span>
-                  <span className="text-[10px] font-mono text-amber-400 font-bold">
-                    {currentLevel?.hintsUsed ?? 0}/3 USED
-                  </span>
-                </div>
-
-                <div className="flex flex-col gap-2">
-                  {level.hints.map((hint) => {
-                    const revealed = revealedHintIds.has(hint.id) || revealedHints[hint.id];
-                    const text = revealedHints[hint.id];
-
-                    return (
-                      <div key={hint.id} className="bg-zinc-950 rounded-xl p-3 border border-zinc-800">
-                        {revealed && text ? (
-                          <p className="text-xs text-amber-300 font-mono leading-relaxed">{text}</p>
-                        ) : revealed ? (
-                          <p className="text-xs text-zinc-400 font-mono italic">Hint decrypted.</p>
-                        ) : (
-                          <button
-                            onClick={() => useHint(hint)}
-                            disabled={hintLoading === hint.orderIndex || (currentLevel?.hintsUsed ?? 0) >= 3}
-                            className="w-full text-left text-xs text-amber-400 hover:text-amber-300 font-semibold flex items-center justify-between min-h-[36px]"
-                          >
-                            <span className="font-mono text-xs">REVEAL INTEL #{hint.orderIndex}</span>
-                            <span className="text-[10px] font-mono bg-amber-500/10 border border-amber-500/25 px-2 py-0.5 rounded-md text-amber-300">
-                              +{hint.penaltyMins}M PENALTY
-                            </span>
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* 5. Mission Solution Decoder Form OR Finale Photo Upload */}
-            {level?.isFinal ? (
-              <div className="bg-zinc-900/80 border-2 border-emerald-500/40 rounded-2xl p-4 text-center flex flex-col gap-3 shadow-xl">
-                <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/40 flex items-center justify-center text-emerald-400 mx-auto font-mono font-bold text-sm">
-                  🏁
-                </div>
-                <div>
-                  <h3 className="text-base font-black text-white uppercase tracking-wider font-mono">
-                    GRAND FINALE OBJECTIVE
-                  </h3>
-                  <p className="text-xs text-zinc-300 leading-relaxed mt-1 max-w-xs mx-auto">
-                    1. Intercept target operative at Amphitheatre.<br />
-                    2. Capture live photo together.<br />
-                    3. Sprint to <strong>Start Venue</strong> and present proof!
-                  </p>
-                </div>
-
-                <div className="pt-1 flex flex-col items-center gap-2">
-                  <label className="cursor-pointer py-3 px-5 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-mono font-bold text-xs shadow-lg shadow-emerald-600/30 transition-all flex items-center gap-2">
-                    <span>📷</span>
-                    <span>
-                      {photoUploading
-                        ? 'TRANSMITTING PHOTO…'
-                        : photoUploaded
-                        ? '✓ PHOTO TRANSMITTED (TAP TO RE-TAKE)'
-                        : 'SNAP & TRANSMIT PHOTO'}
-                    </span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      className="hidden"
-                      disabled={photoUploading}
-                      onChange={async (e) => {
-                        const file = e.target.files?.[0];
-                        if (!file) return;
-                        setPhotoError('');
-                        setPhotoUploading(true);
-                        try {
-                          const fd = new FormData();
-                          fd.append('photo', file);
-                          await api.uploadPhoto(fd);
-                          setPhotoUploaded(true);
-                          triggerHaptic();
-                        } catch (err: any) {
-                          setPhotoError(err.message ?? 'Photo upload failed');
-                        } finally {
-                          setPhotoUploading(false);
-                        }
-                      }}
-                    />
-                  </label>
-                  {photoError && <p className="text-rose-400 text-xs font-mono">{photoError}</p>}
-                  {photoUploaded && (
-                    <p className="text-emerald-400 text-[11px] font-mono">
-                      ✓ Photo transmitted to Event Control! Sprint to Start Venue!
-                    </p>
-                  )}
-                </div>
-              </div>
-            ) : !isCompleted && level ? (
-              <form onSubmit={submitAnswer} className="flex flex-col gap-2 pt-1 pb-4">
-                <input
-                  type="text"
-                  value={answer}
-                  onChange={(e) => setAnswer(e.target.value)}
-                  placeholder="ENTER DECODED SOLUTION…"
-                  className="w-full px-4 py-3 rounded-xl bg-zinc-900 border border-zinc-700 text-white placeholder-zinc-500 font-mono text-sm tracking-wider uppercase focus:outline-none focus:border-cyan-400 transition-all"
-                />
-
-                {answerError && (
-                  <p className="text-rose-400 text-xs font-mono font-semibold px-1">{answerError}</p>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={answerLoading || !answer.trim()}
-                  className="w-full py-3 px-4 rounded-xl bg-white hover:bg-zinc-200 active:scale-95 text-zinc-950 font-black text-xs uppercase tracking-widest shadow-xl transition-all min-h-[44px]"
-                >
-                  {answerLoading ? 'VERIFYING SOLUTION…' : 'TRANSMIT DECODED SOLUTION →'}
-                </button>
-              </form>
-            ) : (
-              <div className="text-center text-emerald-300 text-xs font-mono font-bold py-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl mb-4">
-                ✓ STAGE ACCOMPLISHED. ADVANCE TO NEXT OBJECTIVE.
-              </div>
-            )}
-              </>
-            )}
+      <div className="absolute inset-x-0 bottom-0 z-[950] flex flex-col items-center pointer-events-none gap-2.5 max-h-[84dvh]">
+        {/* Floating Radar Card (directly docked above Mission Sheet) */}
+        {currentLevel && !isVerifiedFinished && (
+          <div className="pointer-events-auto w-[calc(100%-1.5rem)] max-w-md px-0.5">
+            <div className="obsidian-surface rounded-3xl p-3.5 sm:p-4">
+              <DistanceRadar
+                distanceMeters={distanceMeters}
+                triggerRadius={triggerRadius}
+                locationReached={locationReached}
+                bearing={bearingDegrees}
+                accuracy={pos?.accuracy}
+                gpsHeading={pos?.heading}
+                onTriggerCheckIn={triggerCheckIn}
+                isLoading={checkInLoading}
+              />
+            </div>
           </div>
         )}
+
+        {/* Minimizable Mission Action Sheet */}
+        <div
+          className={`pointer-events-auto w-full max-w-md bg-[#0c0e14]/95 backdrop-blur-2xl border-t border-x border-white/[0.09] transition-[max-height] duration-300 ease-out flex flex-col rounded-t-3xl shadow-[0_-16px_48px_rgba(0,0,0,0.65)] overflow-hidden ${
+            isSheetExpanded ? 'max-h-[48dvh]' : 'max-h-16'
+          }`}
+        >
+          {/* Sheet Top Handle & Toggle Bar */}
+          <button
+            type="button"
+            onClick={() => setIsSheetExpanded((prev) => !prev)}
+            className="w-full py-2.5 px-5 flex items-center justify-between cursor-pointer border-b border-white/[0.07] shrink-0 bg-zinc-900/40 hover:bg-zinc-900/60 transition-colors select-none text-left min-h-[56px]"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="text-[10px] font-mono uppercase tracking-widest text-cyan-400 font-bold shrink-0">
+                {isVerifiedFinished
+                  ? 'COMPLETE'
+                  : isFinalStep
+                  ? 'FINALE'
+                  : `STAGE ${String(currentStep).padStart(2, '0')} / 10`}
+              </span>
+              <span className="text-xs font-mono font-bold text-white truncate max-w-[175px]">
+                {isVerifiedFinished
+                  ? 'Verified Podium Finish'
+                  : level?.title ?? (game?.status === 'idle' ? 'Standby for Kickoff' : 'Intelligence Directive')}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              {isVerifiedFinished ? (
+                <span className="text-[9px] font-mono tracking-wider uppercase bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 px-2 py-0.5 rounded-md font-bold">
+                  FINISHED
+                </span>
+              ) : currentLevel ? (
+                locationReached ? (
+                  <span className="text-[9px] font-mono tracking-wider uppercase bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 px-2 py-0.5 rounded-md font-bold">
+                    DECRYPTED
+                  </span>
+                ) : (
+                  <span className="text-[9px] font-mono tracking-wider uppercase bg-amber-500/10 border border-amber-500/30 text-amber-300 px-2 py-0.5 rounded-md font-bold">
+                    LOCKED
+                  </span>
+                )
+              ) : null}
+
+              <span
+                className="text-zinc-400 hover:text-white p-1 rounded transition-transform duration-200"
+                style={{ transform: isSheetExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}
+              >
+                <ChevronUpIcon className="w-4 h-4" />
+              </span>
+            </div>
+          </button>
+
+          {/* Sheet Scrollable Body */}
+          {isSheetExpanded && (
+            <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 safe-bottom flex flex-col gap-4 animate-fade-in">
+              {/* Verified Finish Celebration State */}
+              {isVerifiedFinished ? (
+                <div className="py-2 flex flex-col items-center text-center gap-3.5">
+                  <div className="w-14 h-14 rounded-2xl bg-amber-500/15 border border-amber-500/40 flex items-center justify-center text-amber-300 shadow-lg shadow-amber-500/10">
+                    <TrophyIcon className="w-7 h-7" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-mono uppercase tracking-widest text-emerald-400 font-bold">
+                      HUNT ACCOMPLISHED // VERIFIED
+                    </span>
+                    <h3 className="text-xl font-black text-white tracking-tight mt-0.5">
+                      {myRanking?.rank ? `Current Standing: #${myRanking.rank}` : 'Finish Confirmed'}
+                    </h3>
+                    <p className="text-xs text-zinc-400 mt-1 max-w-xs leading-relaxed">
+                      Coordinators verified your finale sprint. Standby at the main stage for official podium ceremony.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2.5 w-full font-mono">
+                    <div className="bg-zinc-900/70 border border-white/[0.06] rounded-2xl p-3">
+                      <span className="text-[9px] text-zinc-500 uppercase block">Official Time</span>
+                      <span className="text-sm font-black text-emerald-400 tabular-nums mt-0.5 block">
+                        {myRanking?.adjustedTimeSecs != null
+                          ? formatMs(myRanking.adjustedTimeSecs * 1000)
+                          : elapsedFormatted}
+                      </span>
+                    </div>
+                    <div className="bg-zinc-900/70 border border-white/[0.06] rounded-2xl p-3">
+                      <span className="text-[9px] text-zinc-500 uppercase block">Hints Penalty</span>
+                      <span className="text-sm font-black text-amber-300 tabular-nums mt-0.5 block">
+                        +{totalHintPenaltiesMins}m
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ) : !currentLevel ? (
+                /* Standby State before Kickoff */
+                <div className="py-3 flex flex-col items-center justify-center text-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-cyan-950/60 border border-cyan-400/30 flex items-center justify-center text-cyan-400 animate-pulse shadow-lg">
+                    <RadarIcon className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-mono uppercase tracking-widest text-cyan-400 font-bold">
+                      STANDBY // MISSION READY
+                    </span>
+                    <h3 className="text-base font-black text-white mt-1">Awaiting Event Kickoff</h3>
+                    <p className="text-xs text-zinc-400 mt-1 max-w-xs leading-relaxed font-sans">
+                      Squad <strong className="text-zinc-200">{teamName}</strong> is registered. When coordinators start the hunt, your unique starting landmark will unlock automatically.
+                    </p>
+                  </div>
+                  <div className="text-[11px] font-mono text-zinc-300 bg-zinc-900/80 px-3.5 py-1.5 rounded-xl border border-white/[0.08] flex items-center gap-2 tabular-nums">
+                    <span className={`w-2 h-2 rounded-full ${pos ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+                    <span>{pos ? `GPS Calibrated (±${Math.round(pos.accuracy)}m)` : 'Acquiring GPS fix…'}</span>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {/* 1. Clue Intel Box */}
+                  {locationReached ? (
+                    <div className="bg-zinc-900/70 border border-white/[0.07] rounded-2xl p-4 flex flex-col gap-1.5">
+                      <span className="text-[9px] font-mono uppercase tracking-widest text-cyan-400 font-bold">
+                        CLASSIFIED FIELD BRIEFING
+                      </span>
+                      <p className="text-xs sm:text-sm text-zinc-100 font-normal leading-relaxed">
+                        {level?.clueText}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="bg-zinc-900/60 border border-white/[0.07] rounded-2xl p-4 text-center flex flex-col items-center gap-2">
+                      <div className="w-8 h-8 rounded-xl bg-zinc-800/80 border border-zinc-700 flex items-center justify-center text-amber-400">
+                        <LockIcon className="w-4 h-4" />
+                      </div>
+                      <h3 className="font-bold text-white text-xs uppercase tracking-wider font-mono">
+                        GEOFENCE ENCRYPTION ACTIVE
+                      </h3>
+                      <p className="text-[11px] text-zinc-400 leading-relaxed max-w-xs">
+                        Physical proximity verification required. Move within {triggerRadius}m of the landmark to decrypt intelligence.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* 2. Campus Navigation Guidance */}
+                  {level?.locationHint && (
+                    <div className="bg-zinc-900/60 border border-white/[0.07] rounded-2xl p-3.5 flex flex-col gap-1">
+                      <span className="text-[9px] font-mono uppercase tracking-widest text-zinc-400 font-bold">
+                        CAMPUS SECTOR GUIDANCE
+                      </span>
+                      <p className="text-xs text-zinc-200 font-medium leading-relaxed">
+                        {level.locationHint}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* 3. External Dossier Links & Teammate QR Scanner */}
+                  {level && level.socialLinks.length > 0 && locationReached && (
+                    <div className="bg-zinc-900/60 border border-white/[0.07] rounded-2xl p-4 flex flex-col gap-3">
+                      <div className="flex items-center justify-between border-b border-white/[0.07] pb-2">
+                        <span className="text-[9px] font-mono uppercase tracking-widest text-zinc-300 font-bold flex items-center gap-1.5">
+                          <LinkIcon className="w-3.5 h-3.5 text-cyan-400" />
+                          <span>EXTERNAL DOSSIER INTEL</span>
+                        </span>
+                        <span className="text-[10px] font-mono text-cyan-400 font-bold tabular-nums">
+                          {level.socialLinks.length} {level.socialLinks.length === 1 ? 'LINK' : 'LINKS'}
+                        </span>
+                      </div>
+
+                      <div className="flex flex-col gap-3">
+                        {level.socialLinks.map((sl, i) => (
+                          <div key={i} className="flex flex-col gap-2.5 p-3.5 bg-zinc-950/70 border border-white/[0.07] rounded-xl">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-mono font-bold text-white uppercase flex items-center gap-1.5">
+                                <GlobeIcon className="w-3.5 h-3.5 text-zinc-400" />
+                                <span>{sl.platform}</span>
+                              </span>
+                              <a
+                                href={sl.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-cyan-300 text-[11px] font-mono uppercase transition-all flex items-center gap-1"
+                              >
+                                <span>Open</span>
+                                <span className="text-[10px]">↗</span>
+                              </a>
+                            </div>
+
+                            <QrCodeDisplay
+                              url={sl.url}
+                              label={`SCAN FOR ${sl.platform.toUpperCase()}`}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 4. Tactical Assistance Hints */}
+                  {!isCompleted && level && level.hints.length > 0 && locationReached && (
+                    <div className="bg-zinc-900/60 border border-white/[0.07] rounded-2xl p-3.5 flex flex-col gap-2.5">
+                      <div className="flex items-center justify-between border-b border-white/[0.07] pb-2">
+                        <span className="text-[9px] font-mono uppercase tracking-widest text-zinc-400 font-bold">
+                          TACTICAL ASSISTANCE DECRYPTS
+                        </span>
+                        <span className="text-[10px] font-mono text-amber-400 font-bold tabular-nums">
+                          {currentLevel?.hintsUsed ?? 0}/3 USED
+                        </span>
+                      </div>
+
+                      <div className="flex flex-col gap-2">
+                        {level.hints.map((hint) => {
+                          const revealed = revealedHintIds.has(hint.id) || revealedHints[hint.id];
+                          const text = revealedHints[hint.id];
+
+                          return (
+                            <div key={hint.id} className="bg-[#07080b] rounded-xl p-3 border border-white/[0.07]">
+                              {revealed && text ? (
+                                <p className="text-xs text-amber-300 font-mono leading-relaxed">{text}</p>
+                              ) : revealed ? (
+                                <p className="text-xs text-zinc-400 font-mono italic">Hint decrypted.</p>
+                              ) : (
+                                <button
+                                  onClick={() => useHint(hint)}
+                                  disabled={hintLoading === hint.orderIndex || (currentLevel?.hintsUsed ?? 0) >= 3}
+                                  className="w-full text-left text-xs text-amber-400 hover:text-amber-300 disabled:opacity-50 font-semibold flex items-center justify-between min-h-[38px]"
+                                >
+                                  <span className="font-mono text-xs">
+                                    {hintLoading === hint.orderIndex ? 'DECRYPTING…' : `REVEAL INTEL #${hint.orderIndex}`}
+                                  </span>
+                                  <span className="text-[10px] font-mono bg-amber-500/10 border border-amber-500/25 px-2 py-0.5 rounded-md text-amber-300 tabular-nums">
+                                    +{hint.penaltyMins}M PENALTY
+                                  </span>
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 5. Mission Solution Decoder Form OR Finale Photo Upload */}
+                  {level?.isFinal ? (
+                    <div className="bg-zinc-900/80 border border-emerald-500/45 rounded-2xl p-4 text-center flex flex-col gap-3 shadow-xl">
+                      <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/40 flex items-center justify-center text-emerald-400 mx-auto">
+                        <FlagIcon className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-black text-white uppercase tracking-wider font-mono">
+                          GRAND FINALE OBJECTIVE
+                        </h3>
+                        <p className="text-xs text-zinc-300 leading-relaxed mt-1 max-w-xs mx-auto">
+                          1. Intercept target operative at Amphitheatre.<br />
+                          2. Capture live photo together.<br />
+                          3. Sprint to <strong className="text-white">Start Venue</strong> and present proof.
+                        </p>
+                      </div>
+
+                      <div className="pt-1 flex flex-col items-center gap-2">
+                        <label className="cursor-pointer py-3 px-5 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-[0.98] text-zinc-950 font-mono font-black text-xs shadow-lg shadow-emerald-500/20 transition-all flex items-center gap-2 min-h-[44px]">
+                          {photoUploaded ? (
+                            <CheckIcon className="w-4 h-4" />
+                          ) : (
+                            <CameraIcon className="w-4 h-4" />
+                          )}
+                          <span>
+                            {photoUploading
+                              ? 'TRANSMITTING PHOTO…'
+                              : photoUploaded
+                              ? 'PHOTO TRANSMITTED (TAP TO RE-TAKE)'
+                              : 'SNAP & TRANSMIT PHOTO'}
+                          </span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            className="hidden"
+                            disabled={photoUploading}
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              setPhotoError('');
+                              setPhotoUploading(true);
+                              try {
+                                const fd = new FormData();
+                                fd.append('photo', file);
+                                await api.uploadPhoto(fd);
+                                setPhotoUploaded(true);
+                                triggerHaptic();
+                                toast('Finale photo uploaded — sprint to Start Venue!', 'success');
+                              } catch (err: any) {
+                                setPhotoError(err.message ?? 'Photo upload failed');
+                              } finally {
+                                setPhotoUploading(false);
+                              }
+                            }}
+                          />
+                        </label>
+                        {photoError && <p className="text-rose-400 text-xs font-mono">{photoError}</p>}
+                        {photoUploaded && (
+                          <p className="text-emerald-400 text-[11px] font-mono flex items-center gap-1">
+                            <CheckIcon className="w-3.5 h-3.5" />
+                            <span>Transmitted to Event Control! Sprint to Start Venue!</span>
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ) : !isCompleted && level ? (
+                    <form onSubmit={submitAnswer} className="flex flex-col gap-2 pt-1 pb-2">
+                      <input
+                        type="text"
+                        value={answer}
+                        onChange={(e) => setAnswer(e.target.value)}
+                        placeholder="ENTER DECODED SOLUTION…"
+                        className="w-full px-4 py-3 rounded-xl bg-[#07080b] border border-white/15 text-white placeholder-zinc-500 font-mono text-sm tracking-wider uppercase focus:outline-none focus:border-cyan-400 transition-all"
+                      />
+
+                      {answerError && (
+                        <p className="text-rose-400 text-xs font-mono font-semibold px-1">{answerError}</p>
+                      )}
+
+                      <button
+                        type="submit"
+                        disabled={answerLoading || !answer.trim()}
+                        className="w-full py-3 px-4 rounded-xl bg-white hover:bg-zinc-200 disabled:opacity-50 active:scale-[0.98] text-zinc-950 font-black text-xs uppercase tracking-widest shadow-xl transition-all min-h-[46px]"
+                      >
+                        {answerLoading ? 'VERIFYING SOLUTION…' : 'TRANSMIT DECODED SOLUTION →'}
+                      </button>
+                    </form>
+                  ) : (
+                    <div className="text-center text-emerald-300 text-xs font-mono font-bold py-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl mb-2 flex items-center justify-center gap-1.5">
+                      <CheckIcon className="w-4 h-4" />
+                      <span>STAGE ACCOMPLISHED. ADVANCE TO NEXT OBJECTIVE.</span>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* =========================================================================
           SQUAD OPERATIVE DOSSIER MODAL
           ========================================================================= */}
       {showProfileModal && (
-        <div className="fixed inset-0 z-[1200] bg-zinc-950/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 max-w-sm w-full shadow-2xl flex flex-col gap-5">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+        <div
+          onClick={() => setShowProfileModal(false)}
+          className="fixed inset-0 z-[1200] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="obsidian-surface rounded-3xl p-6 max-w-sm w-full flex flex-col gap-5 animate-scale-in"
+          >
+            <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">
               <div>
                 <span className="text-[10px] font-mono uppercase tracking-widest text-cyan-400 font-bold">
                   SQUAD DOSSIER
@@ -878,15 +1056,16 @@ export default function PlayDashboard() {
               </div>
               <button
                 onClick={() => setShowProfileModal(false)}
-                className="w-8 h-8 rounded-full bg-zinc-800 text-zinc-400 hover:text-white flex items-center justify-center font-mono text-sm"
+                aria-label="Close squad dossier"
+                className="w-8 h-8 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white flex items-center justify-center transition-colors"
               >
-                ✕
+                <XIcon className="w-4 h-4" />
               </button>
             </div>
 
             {/* Tactical Stats */}
             <div className="grid grid-cols-2 gap-3">
-              <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-3.5 text-center">
+              <div className="bg-[#07080b] border border-white/[0.07] rounded-2xl p-3.5 text-center">
                 <p className="text-2xl font-black font-mono text-white tabular-nums">
                   {completedCount}/{totalLevels}
                 </p>
@@ -895,7 +1074,7 @@ export default function PlayDashboard() {
                 </p>
               </div>
 
-              <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-3.5 text-center">
+              <div className="bg-[#07080b] border border-white/[0.07] rounded-2xl p-3.5 text-center">
                 <p className="text-2xl font-black font-mono text-amber-400 tabular-nums">
                   {progress.reduce((s, p) => s + p.hintsUsed, 0)}
                 </p>
@@ -906,11 +1085,11 @@ export default function PlayDashboard() {
             </div>
 
             {/* Diagnostics */}
-            <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-3.5 flex flex-col gap-2 text-xs font-mono">
+            <div className="bg-[#07080b] border border-white/[0.07] rounded-2xl p-3.5 flex flex-col gap-2.5 text-xs font-mono">
               <div className="flex items-center justify-between text-zinc-300">
                 <span>GPS Sensor</span>
                 <div className="flex items-center gap-2">
-                  <span className="text-emerald-400 font-bold">
+                  <span className="text-emerald-400 font-bold tabular-nums">
                     {pos ? `ONLINE (±${Math.round(pos.accuracy)}m)` : 'SEARCHING…'}
                   </span>
                   <button
@@ -930,12 +1109,51 @@ export default function PlayDashboard() {
                   {connected ? 'CONNECTED' : 'DISCONNECTED'}
                 </span>
               </div>
+              <div className="flex items-center justify-between text-zinc-300 pt-1.5 border-t border-white/[0.06]">
+                <span className="flex items-center gap-1.5">
+                  <SquidSymbolsIcon className="w-5 h-2.5 text-rose-400" />
+                  <span>Arena PA Voice</span>
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (voiceMuted) toggleVoiceMute();
+                      primeSpeechEngine();
+                      setShowProfileModal(false);
+                      announceArenaWelcome(teamName);
+                    }}
+                    className="px-2 py-0.5 rounded bg-rose-950/70 border border-rose-500/40 text-rose-300 text-[10px] font-bold hover:bg-rose-900/70 transition-colors"
+                  >
+                    REPLAY INTRO
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (voiceMuted) {
+                        toggleVoiceMute();
+                        primeSpeechEngine();
+                      } else {
+                        stopPaVoice();
+                        toggleVoiceMute();
+                      }
+                    }}
+                    className={`px-2 py-0.5 rounded border text-[10px] font-bold transition-colors ${
+                      voiceMuted
+                        ? 'bg-zinc-900 border-zinc-700 text-zinc-400'
+                        : 'bg-emerald-950/70 border-emerald-500/40 text-emerald-300'
+                    }`}
+                  >
+                    {voiceMuted ? 'MUTED' : 'ON'}
+                  </button>
+                </div>
+              </div>
             </div>
 
             {/* Sign Out Button */}
             <button
               onClick={handleLogout}
-              className="w-full py-2.5 rounded-xl bg-zinc-800 hover:bg-rose-950/40 text-zinc-300 hover:text-rose-400 border border-zinc-700 hover:border-rose-500/30 text-xs font-mono font-bold transition-all"
+              className="w-full py-2.5 rounded-xl bg-zinc-900 hover:bg-rose-950/40 text-zinc-300 hover:text-rose-300 border border-zinc-800 hover:border-rose-500/40 text-xs font-mono font-bold transition-all min-h-[42px]"
             >
               SIGN OUT OF FIELD TERMINAL
             </button>

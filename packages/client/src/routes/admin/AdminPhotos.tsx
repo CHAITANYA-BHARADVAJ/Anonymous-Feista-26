@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { getSocket } from '../../lib/socket';
+import { useUiStore } from '../../stores/uiStore';
 
 const REJECTION_PRESETS = [
   'Target landmark not clearly identifiable',
@@ -20,13 +21,7 @@ export default function AdminPhotos() {
   const [rejectDialogPhoto, setRejectDialogPhoto] = useState<any | null>(null);
   const [customRejectReason, setCustomRejectReason] = useState(REJECTION_PRESETS[0]);
 
-  // Toast feedback
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'warn' } | null>(null);
-
-  function showToast(message: string, type: 'success' | 'warn' = 'success') {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3500);
-  }
+  const toast = useUiStore((s) => s.toast);
 
   useEffect(() => {
     loadPhotos();
@@ -59,14 +54,14 @@ export default function AdminPhotos() {
       await api.reviewPhoto(id, 'approved', '');
       if (verifyFinish && teamId) {
         await api.verifyTeamFinish(teamId);
-        showToast('Photo approved & team finish officially verified.', 'success');
+        toast('Photo approved & team finish officially verified.', 'success');
       } else {
-        showToast('Photo approved successfully.', 'success');
+        toast('Photo approved successfully.', 'success');
       }
       await loadPhotos();
       if (selectedPhoto?.id === id) setSelectedPhoto(null);
     } catch (err: any) {
-      showToast(err.message ?? 'Failed to approve photo', 'warn');
+      toast(err.message ?? 'Failed to approve photo', 'error');
     } finally {
       setActionLoadingId(null);
     }
@@ -84,12 +79,12 @@ export default function AdminPhotos() {
 
     try {
       await api.reviewPhoto(photoId, 'rejected', customRejectReason.trim());
-      showToast(`Photo rejected: ${customRejectReason.trim()}`, 'warn');
+      toast(`Photo rejected: ${customRejectReason.trim()}`, 'warn');
       setRejectDialogPhoto(null);
       await loadPhotos();
       if (selectedPhoto?.id === photoId) setSelectedPhoto(null);
     } catch (err: any) {
-      showToast(err.message ?? 'Failed to reject photo', 'warn');
+      toast(err.message ?? 'Failed to reject photo', 'error');
     } finally {
       setActionLoadingId(null);
     }
@@ -106,29 +101,6 @@ export default function AdminPhotos() {
 
   return (
     <div className="p-4 md:p-6 flex flex-col gap-5 max-w-7xl mx-auto pb-24 font-sans text-zinc-100 relative">
-      {/* Toast Notification */}
-      {toast && (
-        <div className="fixed bottom-6 right-6 z-50 animate-fade-in">
-          <div
-            className={`px-4 py-2.5 rounded-xl border shadow-2xl flex items-center gap-2.5 text-xs font-medium backdrop-blur-xl ${
-              toast.type === 'success'
-                ? 'bg-emerald-950/90 border-emerald-500/40 text-emerald-200 shadow-emerald-950/50'
-                : 'bg-zinc-900/90 border-amber-500/40 text-amber-200 shadow-black/80'
-            }`}
-          >
-            {toast.type === 'success' ? (
-              <svg className="w-4 h-4 text-emerald-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
-            ) : (
-              <svg className="w-4 h-4 text-amber-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
-            )}
-            <span>{toast.message}</span>
-          </div>
-        </div>
-      )}
 
       {/* Header Banner */}
       <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-5 flex flex-wrap items-center justify-between gap-4">

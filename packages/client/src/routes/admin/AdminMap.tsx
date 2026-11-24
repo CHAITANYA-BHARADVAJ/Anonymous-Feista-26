@@ -5,6 +5,8 @@ import 'leaflet/dist/leaflet.css';
 
 import { api } from '../../lib/api';
 import { getSocket } from '../../lib/socket';
+import { useUiStore } from '../../stores/uiStore';
+import { PauseIcon } from '../../components/Icons';
 import {
   SDMCET_CENTER,
   SDMCET_MAX_BOUNDS,
@@ -278,10 +280,9 @@ export default function AdminMap() {
     }
   }
 
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'warn' } | null>(null);
-  function showToast(message: string, type: 'success' | 'warn' = 'success') {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
+  const globalToast = useUiStore((s) => s.toast);
+  function showToast(message: string, type: 'success' | 'warn' | 'error' = 'success') {
+    globalToast(message, type);
   }
 
   function handleCopyCode(teamId: number, code: string) {
@@ -303,7 +304,7 @@ export default function AdminMap() {
       setNudgeTeam(null);
       setNudgeMessage('');
     } catch (err: any) {
-      showToast(err.message ?? 'Failed to send nudge', 'warn');
+      showToast(err.message ?? 'Failed to send nudge', 'error');
     } finally {
       setIsSendingNudge(false);
     }
@@ -317,21 +318,7 @@ export default function AdminMap() {
   }
 
   return (
-    <div className="relative w-full h-[calc(100vh-3.5rem)] md:h-screen bg-zinc-950 text-zinc-100 flex overflow-hidden select-none">
-      {/* Toast Feedback */}
-      {toast && (
-        <div className="fixed top-16 right-6 z-[2000] animate-fade-in pointer-events-none">
-          <div
-            className={`px-4 py-2.5 rounded-xl border shadow-2xl flex items-center gap-2.5 text-xs font-medium backdrop-blur-xl ${
-              toast.type === 'success'
-                ? 'bg-emerald-950/90 border-emerald-500/40 text-emerald-200 shadow-emerald-950/50'
-                : 'bg-zinc-900/90 border-amber-500/40 text-amber-200 shadow-black/80'
-            }`}
-          >
-            <span>{toast.message}</span>
-          </div>
-        </div>
-      )}
+    <div className="relative w-full h-[calc(100dvh-3.5rem)] md:h-[100dvh] bg-zinc-950 text-zinc-100 flex overflow-hidden select-none">
       {/* =========================================================================
           FULL-SCREEN INTERACTIVE SATELLITE MAP (NO BLOCKING ROSTER DRAWER)
           ========================================================================= */}
@@ -370,13 +357,15 @@ export default function AdminMap() {
                       try {
                         const updated: any = await api.patchGameStatus(game.id, 'pause');
                         setGame((g: any) => ({ ...(g || {}), ...(updated || {}) }));
+                        showToast('Event timers paused.', 'warn');
                       } catch (err: any) {
-                        alert(err.message ?? 'Pause failed');
+                        showToast(err.message ?? 'Pause failed', 'error');
                       }
                     }}
-                    className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-mono text-[10px] font-bold border border-amber-500/30 transition-all active:scale-95"
+                    className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-mono text-[10px] font-bold border border-amber-500/30 transition-all active:scale-95 flex items-center gap-1"
                   >
-                    ⏸ Pause
+                    <PauseIcon className="w-2.5 h-2.5" />
+                    <span>Pause</span>
                   </button>
                 )}
 
@@ -386,13 +375,17 @@ export default function AdminMap() {
                       try {
                         const updated: any = await api.patchGameStatus(game.id, 'resume');
                         setGame((g: any) => ({ ...(g || {}), ...(updated || {}) }));
+                        showToast('Event timers resumed.', 'success');
                       } catch (err: any) {
-                        alert(err.message ?? 'Resume failed');
+                        showToast(err.message ?? 'Resume failed', 'error');
                       }
                     }}
-                    className="px-2 py-0.5 rounded bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-mono text-[10px] font-black transition-all active:scale-95"
+                    className="px-2 py-0.5 rounded bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-mono text-[10px] font-black transition-all active:scale-95 flex items-center gap-1"
                   >
-                    ▶ Resume
+                    <svg className="w-2.5 h-2.5 fill-current" viewBox="0 0 24 24">
+                      <path d="M8 5v14l11-7z" />
+                    </svg>
+                    <span>Resume</span>
                   </button>
                 )}
               </div>
@@ -572,7 +565,7 @@ export default function AdminMap() {
                   <div className="p-1 font-mono text-xs text-white">
                     <div className="font-bold text-cyan-300">{team.name}</div>
                     <div className="text-[10px] text-zinc-300">
-                      {team.isFinished ? 'Finished 🏁' : `Step ${team.currentStep}/10`}
+                      {team.isFinished ? 'Finished' : `Step ${team.currentStep}/10`}
                     </div>
                   </div>
                 </Tooltip>
@@ -585,7 +578,7 @@ export default function AdminMap() {
             FLOATING SQUAD DETAIL CARD (SHOWN ONLY WHEN TEAM IS HOVERED OR CLICKED)
             ========================================================================= */}
         {activeFocusTeam && (
-          <div className="absolute bottom-5 left-4 right-4 md:right-auto md:w-96 z-[1000] bg-zinc-950/95 backdrop-blur-xl border border-zinc-800 rounded-2xl p-4 shadow-2xl flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <div className="absolute bottom-5 left-4 right-4 md:right-auto md:w-96 z-[1000] obsidian-surface rounded-2xl p-4 flex flex-col gap-3 animate-slide-up">
             {/* Header */}
             <div className="flex items-start justify-between gap-2 border-b border-zinc-800 pb-2">
               <div>
@@ -594,8 +587,8 @@ export default function AdminMap() {
                     Squad #{activeFocusTeam.id}
                   </span>
                   {activeFocusTeam.isFinished ? (
-                    <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 text-[9px] font-bold font-mono">
-                      FINISHED 🏁
+                    <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[9px] font-bold font-mono">
+                      FINISHED
                     </span>
                   ) : (
                     <span className="px-1.5 py-0.2 rounded bg-cyan-950/60 text-cyan-300 border border-cyan-500/30 text-[9px] font-bold font-mono">

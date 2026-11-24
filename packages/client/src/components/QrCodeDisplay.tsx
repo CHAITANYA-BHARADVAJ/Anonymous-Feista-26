@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { BrowserQRCodeSvgWriter } from '@zxing/library';
+import { QrScanIcon, XIcon } from './Icons';
 
 interface QrCodeDisplayProps {
   url: string;
@@ -43,7 +44,7 @@ export default function QrCodeDisplay({ url, size = 150, label }: QrCodeDisplayP
 
   return (
     <>
-      <div className="flex flex-col items-center bg-zinc-900 border border-zinc-800 rounded-2xl p-3 gap-2 shadow-lg w-full max-w-xs mx-auto">
+      <div className="flex flex-col items-center bg-zinc-900/90 border border-white/[0.08] rounded-2xl p-3 gap-2 shadow-lg w-full max-w-xs mx-auto">
         {/* QR Canvas Container */}
         <div
           onClick={() => setIsExpanded(true)}
@@ -55,13 +56,14 @@ export default function QrCodeDisplay({ url, size = 150, label }: QrCodeDisplayP
 
         {/* Scan Instruction */}
         <div className="flex flex-col items-center text-center gap-0.5">
-          <span className="text-[9px] font-mono font-bold uppercase tracking-widest text-cyan-400 flex items-center gap-1">
-            <span>📱</span> {label ?? "SCAN WITH TEAMMATE'S PHONE"}
+          <span className="text-[9px] font-mono font-bold uppercase tracking-widest text-cyan-400 flex items-center gap-1.5">
+            <QrScanIcon className="w-3 h-3" />
+            <span>{label ?? "SCAN WITH TEAMMATE'S PHONE"}</span>
           </span>
           <button
             type="button"
             onClick={() => setIsExpanded(true)}
-            className="text-[10px] font-mono text-zinc-400 hover:text-white underline transition-colors"
+            className="text-[10px] font-mono text-zinc-400 hover:text-white underline underline-offset-2 transition-colors"
           >
             Tap to Enlarge (Full Scan) ↗
           </button>
@@ -72,17 +74,18 @@ export default function QrCodeDisplay({ url, size = 150, label }: QrCodeDisplayP
       {isExpanded && (
         <div
           onClick={() => setIsExpanded(false)}
-          className="fixed inset-0 z-[1500] bg-black/85 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in duration-200"
+          className="fixed inset-0 z-[1500] bg-black/85 backdrop-blur-md flex items-center justify-center p-6 animate-fade-in"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-zinc-950 border border-zinc-800 rounded-3xl p-6 flex flex-col items-center gap-4 max-w-sm w-full text-center shadow-2xl relative"
+            className="obsidian-surface rounded-3xl p-6 flex flex-col items-center gap-4 max-w-sm w-full text-center relative animate-scale-in"
           >
             <button
               onClick={() => setIsExpanded(false)}
-              className="absolute top-4 right-4 w-8 h-8 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white flex items-center justify-center text-sm font-mono transition-colors"
+              aria-label="Close enlarged QR code"
+              className="absolute top-4 right-4 w-8 h-8 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white flex items-center justify-center transition-colors"
             >
-              ✕
+              <XIcon className="w-4 h-4" />
             </button>
 
             <div>
@@ -96,20 +99,16 @@ export default function QrCodeDisplay({ url, size = 150, label }: QrCodeDisplayP
             </div>
 
             {/* Giant White QR Canvas */}
-            <div className="bg-white p-4 rounded-2xl shadow-2xl w-[280px] h-[280px] flex items-center justify-center">
+            <div className="bg-white p-4 rounded-2xl shadow-2xl w-[260px] h-[260px] flex items-center justify-center">
               <div ref={modalContainerRef} className="w-full h-full flex items-center justify-center" />
             </div>
-
-            <p className="text-[11px] font-mono text-zinc-400">
-              Hold teammate's phone camera 1–2 feet away to inspect social media profile.
-            </p>
 
             <button
               type="button"
               onClick={() => setIsExpanded(false)}
-              className="w-full py-2.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-zinc-200 font-mono text-xs uppercase tracking-wider font-bold transition-all"
+              className="w-full py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white text-xs font-mono font-bold transition-all min-h-[42px]"
             >
-              Close QR View
+              Close Scanner Overlay
             </button>
           </div>
         </div>

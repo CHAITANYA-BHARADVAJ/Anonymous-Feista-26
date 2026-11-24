@@ -11,12 +11,90 @@ function getAudioContext(): AudioContext | null {
       }
     }
     if (audioCtx && audioCtx.state === 'suspended') {
-      audioCtx.resume();
+      audioCtx.resume().catch(() => {});
     }
     return audioCtx;
   } catch {
     return null;
   }
+}
+
+/** Prime Web Audio during user gesture so subsequent PA announcements unlock cleanly */
+export function unlockAudioContext() {
+  getAudioContext();
+}
+
+/** Authentic Squid Game style two-tone PA announcement bell (E5 -> C5 resonance) */
+export function playPaChime() {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+
+  const sequence = [
+    { freq: 659.25, overtone: 1318.5, start: 0, dur: 0.42 }, // E5
+    { freq: 523.25, overtone: 1046.5, start: 0.24, dur: 0.58 }, // C5
+  ];
+
+  sequence.forEach((n) => {
+    const osc = ctx.createOscillator();
+    const harm = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const harmGain = ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(n.freq, ctx.currentTime + n.start);
+
+    harm.type = 'triangle';
+    harm.frequency.setValueAtTime(n.overtone, ctx.currentTime + n.start);
+
+    gain.gain.setValueAtTime(0, ctx.currentTime + n.start);
+    gain.gain.linearRampToValueAtTime(0.24, ctx.currentTime + n.start + 0.018);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + n.start + n.dur);
+
+    harmGain.gain.setValueAtTime(0, ctx.currentTime + n.start);
+    harmGain.gain.linearRampToValueAtTime(0.06, ctx.currentTime + n.start + 0.015);
+    harmGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + n.start + n.dur * 0.65);
+
+    osc.connect(gain);
+    harm.connect(harmGain);
+    gain.connect(ctx.destination);
+    harmGain.connect(ctx.destination);
+
+    osc.start(ctx.currentTime + n.start);
+    harm.start(ctx.currentTime + n.start);
+    osc.stop(ctx.currentTime + n.start + n.dur + 0.05);
+    harm.stop(ctx.currentTime + n.start + n.dur + 0.05);
+  });
+}
+
+/** High-energy ascending tactical kickoff fanfare when the hunt begins */
+export function playKickoffFanfare() {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+
+  const hits = [
+    { freq: 523.25, start: 0, dur: 0.14 },     // C5
+    { freq: 659.25, start: 0.1, dur: 0.14 },   // E5
+    { freq: 783.99, start: 0.2, dur: 0.16 },   // G5
+    { freq: 1046.5, start: 0.31, dur: 0.48 },  // C6 accent
+  ];
+
+  hits.forEach((h) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(h.freq, ctx.currentTime + h.start);
+
+    gain.gain.setValueAtTime(0, ctx.currentTime + h.start);
+    gain.gain.linearRampToValueAtTime(0.26, ctx.currentTime + h.start + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + h.start + h.dur);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(ctx.currentTime + h.start);
+    osc.stop(ctx.currentTime + h.start + h.dur + 0.04);
+  });
 }
 
 /** Triumphant 4-note celebration chime when clue location is reached */

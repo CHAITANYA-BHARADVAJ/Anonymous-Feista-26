@@ -63,9 +63,9 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
   res.status(500).json({ error: err.message ?? 'Internal server error' });
 });
 
-// Serve built React PWA client in production
+// Serve built React PWA client in production (skip during `npm run dev` so Vite :5173 stays the sole UI)
 const clientDist = path.resolve(__dirname, '../../client/dist');
-if (fs.existsSync(clientDist)) {
+if (process.env.npm_lifecycle_event !== 'dev' && fs.existsSync(clientDist)) {
   console.log(`📦 Serving production client assets from: ${clientDist}`);
   app.use(express.static(clientDist));
   app.get('*', (req, res, next) => {

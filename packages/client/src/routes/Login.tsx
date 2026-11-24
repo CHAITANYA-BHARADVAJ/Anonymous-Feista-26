@@ -3,10 +3,13 @@ import { useNavigate, Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuthStore } from '../stores/authStore';
 import { requestFullscreen, enableAutoFullscreenOnFirstGesture } from '../lib/fullscreen';
+import { primeSpeechEngine } from '../lib/voice';
+import { AlertTriangleIcon, EyeIcon, EyeOffIcon } from '../components/Icons';
 
 export default function Login() {
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
+  const [showCode, setShowCode] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const role = useAuthStore((s) => s.role);
@@ -34,9 +37,11 @@ export default function Login() {
     e.preventDefault();
     setError('');
     setLoading(true);
+    primeSpeechEngine();
     requestFullscreen().catch(() => {});
     try {
       const data = await api.teamLogin(name.trim(), code.trim());
+      sessionStorage.setItem('ch-pa-pending-intro', '1');
       setTeam(data.teamId, data.teamName, data.token || '');
       navigate('/play');
     } catch (err: any) {
@@ -47,8 +52,8 @@ export default function Login() {
   }
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen px-6 py-12 relative bg-[#07080b] text-gray-100 overflow-hidden select-none font-sans">
-      <div className="w-full max-w-sm relative z-10 flex flex-col gap-6">
+    <div className="flex flex-col items-center justify-center min-h-[100dvh] px-5 py-10 relative bg-[#07080b] text-gray-100 overflow-y-auto select-none font-sans">
+      <div className="w-full max-w-sm relative z-10 flex flex-col gap-6 my-auto animate-fade-in">
         {/* Terminal Header with Club Logo */}
         <div className="text-center flex flex-col items-center">
           <div className="relative mb-3 group">
@@ -65,16 +70,17 @@ export default function Login() {
             ANONYMOUS SDMCET • CAMPUS HUNT 2026
           </span>
           <h1 className="text-2xl font-black tracking-tight text-white mt-1">Operative Terminal</h1>
-          <p className="text-xs text-gray-400 mt-0.5">Authenticate team credentials to connect</p>
+          <p className="text-xs text-zinc-400 mt-0.5">Authenticate team credentials to connect</p>
         </div>
 
         {/* Terminal Card */}
-        <form onSubmit={handleSubmit} className="bg-[#0c0e14] border border-white/[0.08] rounded-3xl p-6 space-y-4 shadow-2xl relative">
+        <form onSubmit={handleSubmit} className="obsidian-surface rounded-3xl p-6 space-y-4 relative">
           <div>
-            <label className="block text-[10px] font-mono uppercase tracking-widest text-gray-400 font-bold mb-1.5">
+            <label htmlFor="team-name" className="block text-[10px] font-mono uppercase tracking-widest text-zinc-400 font-bold mb-1.5">
               TEAM CALL-SIGN
             </label>
             <input
+              id="team-name"
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -84,45 +90,57 @@ export default function Login() {
               spellCheck={false}
               autoComplete="username"
               placeholder="e.g. Team Alpha"
-              className="w-full px-4 py-3 rounded-xl bg-[#07080b] border border-white/10 text-white placeholder-gray-600 focus:outline-none focus:border-cyan-400 text-sm font-medium transition-all"
+              className="w-full px-4 py-3 rounded-xl bg-[#07080b] border border-white/10 text-white placeholder-zinc-600 focus:outline-none focus:border-cyan-400 text-sm font-medium transition-all"
             />
           </div>
 
           <div>
-            <label className="block text-[10px] font-mono uppercase tracking-widest text-gray-400 font-bold mb-1.5">
+            <label htmlFor="access-code" className="block text-[10px] font-mono uppercase tracking-widest text-zinc-400 font-bold mb-1.5">
               ACCESS CODE
             </label>
-            <input
-              type="password"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              required
-              autoCapitalize="none"
-              autoCorrect="off"
-              spellCheck={false}
-              autoComplete="current-password"
-              placeholder="••••••••"
-              className="w-full px-4 py-3 rounded-xl bg-[#07080b] border border-white/10 text-white placeholder-gray-600 font-mono focus:outline-none focus:border-cyan-400 text-sm font-medium transition-all"
-            />
+            <div className="relative">
+              <input
+                id="access-code"
+                type={showCode ? 'text' : 'password'}
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                required
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                autoComplete="current-password"
+                placeholder="••••••••"
+                className="w-full pl-4 pr-11 py-3 rounded-xl bg-[#07080b] border border-white/10 text-white placeholder-zinc-600 font-mono focus:outline-none focus:border-cyan-400 text-sm font-medium transition-all"
+              />
+              <button
+                type="button"
+                onClick={() => setShowCode((v) => !v)}
+                aria-label={showCode ? 'Hide access code' : 'Show access code'}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/5 transition-colors"
+              >
+                {showCode ? <EyeOffIcon className="w-4 h-4" /> : <EyeIcon className="w-4 h-4" />}
+              </button>
+            </div>
           </div>
 
           {error && (
-            <div className="bg-red-950/80 border border-red-500/40 rounded-xl p-3 text-red-300 text-xs font-mono font-medium text-center">
-              ⚠️ {error}
+            <div role="alert" className="bg-rose-950/75 border border-rose-500/40 rounded-xl p-3 text-rose-200 text-xs font-mono font-medium flex items-center justify-center gap-2">
+              <AlertTriangleIcon className="w-4 h-4 text-rose-400 shrink-0" />
+              <span>{error}</span>
             </div>
           )}
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3.5 px-4 bg-white hover:bg-gray-200 active:scale-95 text-gray-950 font-black text-xs uppercase tracking-widest rounded-xl shadow-xl transition-all min-h-[46px] mt-2"
+            className="w-full py-3.5 px-4 bg-white hover:bg-zinc-200 active:scale-[0.98] disabled:opacity-60 text-zinc-950 font-black text-xs uppercase tracking-widest rounded-xl shadow-xl transition-all min-h-[46px] mt-2"
           >
             {loading ? 'AUTHENTICATING…' : 'CONNECT & COMMENCE →'}
           </button>
 
-          <div className="pt-2 border-t border-white/5 text-center">
-            <Link to="/register" className="text-xs font-mono text-gray-400 hover:text-cyan-300 transition-colors">
-              New team? <span className="text-cyan-400 font-bold underline">Register squad here</span>
+          <div className="pt-2.5 border-t border-white/[0.06] text-center">
+            <Link to="/register" className="text-xs font-mono text-zinc-400 hover:text-cyan-300 transition-colors">
+              New team? <span className="text-cyan-400 font-bold underline underline-offset-4">Register squad here</span>
             </Link>
           </div>
         </form>
@@ -131,7 +149,7 @@ export default function Login() {
           <p className="text-[11px] font-mono text-cyan-400/90 font-medium tracking-wide">
             Designed and developed by Anonymous_SDMCET
           </p>
-          <p className="text-[10px] font-mono text-gray-600 tracking-wider">
+          <p className="text-[10px] font-mono text-zinc-600 tracking-wider">
             SDMCET DHARWAD // RESTRICTED ACCESS
           </p>
         </div>

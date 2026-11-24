@@ -4,6 +4,7 @@ import { useAuthStore } from './stores/authStore';
 import { useSocket } from './hooks/useSocket';
 import { api } from './lib/api';
 import { useGameStore } from './stores/gameStore';
+import FeedbackOverlay from './components/FeedbackOverlay';
 
 const Login = lazy(() => import('./routes/Login'));
 const Register = lazy(() => import('./routes/Register'));
@@ -52,7 +53,14 @@ function AppInner() {
   }, [role]);
 
   return (
-    <Suspense fallback={<div className="flex items-center justify-center h-full text-white">Loading…</div>}>
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center h-[100dvh] bg-[#07080b] text-cyan-400 font-mono text-xs gap-2.5">
+          <div className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+          <span className="tracking-widest uppercase">LOADING INTERFACE…</span>
+        </div>
+      }
+    >
       <Routes>
         <Route
           path="/"
@@ -107,8 +115,9 @@ function AppInner() {
 
 export default function App() {
   return (
-    <div className="h-full bg-gray-950 text-gray-100 font-sans">
+    <div className="h-[100dvh] bg-[#07080b] text-gray-100 font-sans">
       <AppInner />
+      <FeedbackOverlay />
     </div>
   );
 }

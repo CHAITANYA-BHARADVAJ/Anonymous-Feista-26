@@ -110,7 +110,7 @@ export default function AdminLayout() {
   ];
 
   return (
-    <div className="flex h-screen w-full bg-zinc-950 text-zinc-100 font-sans overflow-hidden select-none">
+    <div className="flex h-[100dvh] w-full bg-zinc-950 text-zinc-100 font-sans overflow-hidden select-none">
       {/* ======================================================== */}
       {/* 1. LEFT SLIDING SIDEBAR (Hover expansion on desktop)    */}
       {/* ======================================================== */}
@@ -301,9 +301,12 @@ export default function AdminLayout() {
             <div className="pt-2 border-t border-zinc-800 flex justify-between">
               <button
                 onClick={() => toggleFullscreen()}
-                className="text-xs text-zinc-400 px-3 py-1.5 rounded-lg bg-zinc-800"
+                className="text-xs text-zinc-400 hover:text-zinc-200 px-3 py-1.5 rounded-lg bg-zinc-800 flex items-center gap-1.5"
               >
-                ⛶ Fullscreen
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                </svg>
+                <span>Fullscreen</span>
               </button>
               <button
                 onClick={logout}

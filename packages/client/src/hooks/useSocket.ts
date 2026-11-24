@@ -4,6 +4,13 @@ import { useAuthStore } from '../stores/authStore';
 import { useGameStore } from '../stores/gameStore';
 import { api } from '../lib/api';
 import { playClueUnlockedSound, triggerHaptic } from '../lib/sound';
+import {
+  announceGameEnded,
+  announceGamePaused,
+  announceGameResumed,
+  announceGameStarted,
+  announceVerifiedFinish,
+} from '../lib/voice';
 
 export function useSocket() {
   const token = useAuthStore((s) => s.token);
@@ -50,16 +57,34 @@ export function useSocket() {
     // When admin starts, pauses, resumes, ends, or resets game: reflect immediately!
     const handleGameStatus = async (data: any) => {
       const current = useGameStore.getState().game;
+      const prevStatus = current?.status;
       if (current) setGame({ ...current, ...data });
+      else if (data?.game) setGame(data.game);
+
       if (role === 'team') {
-        const isStart = data?.status === 'running';
-        await syncParticipantData(isStart);
+        const nextStatus = data?.status ?? data?.game?.status;
+        let spokeStatus = false;
+        if (nextStatus && nextStatus !== prevStatus) {
+          if (nextStatus === 'running') {
+            if (prevStatus === 'paused') announceGameResumed();
+            else announceGameStarted();
+            spokeStatus = true;
+          } else if (nextStatus === 'paused') {
+            announceGamePaused();
+            spokeStatus = true;
+          } else if (nextStatus === 'ended') {
+            announceGameEnded();
+            spokeStatus = true;
+          }
+        }
+        const shouldChime = nextStatus === 'running' && !spokeStatus;
+        await syncParticipantData(shouldChime);
       }
     };
 
     socket.on('game:status_changed', handleGameStatus);
     socket.on('game:status', handleGameStatus);
-    socket.on('game:started', () => syncParticipantData(true));
+    socket.on('game:started', handleGameStatus);
 
     socket.on('game:announcement', (data: any) => {
       addAnnouncement(data);
@@ -81,6 +106,11 @@ export function useSocket() {
 
     socket.on('team:verified_finish', async () => {
       await syncParticipantData(true);
+      announceVerifiedFinish(useAuthStore.getState().teamName);
+      try {
+        const { rankings } = await api.getLeaderboard();
+        setRankings(rankings);
+      } catch {}
     });
 
     socket.on('team:penalty_applied', async () => {

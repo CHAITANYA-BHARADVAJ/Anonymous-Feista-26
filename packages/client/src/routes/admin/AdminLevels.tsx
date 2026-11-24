@@ -3,6 +3,8 @@ import { api } from '../../lib/api';
 import { MapContainer, TileLayer, Marker, Circle, Polygon, Popup, useMapEvents } from 'react-leaflet';
 import { MapResizer } from '../../components/MapResizer';
 import { SDMCET_CENTER, SDMCET_MAX_BOUNDS, SDMCET_CAMPUS_POLYGON, SATELLITE_SOURCES } from '../../lib/mapConfig';
+import { useUiStore } from '../../stores/uiStore';
+import { FlagIcon, IntelIcon, MissionIcon, PinIcon, RocketIcon, ShieldAlertIcon, TrashIcon } from '../../components/Icons';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -96,6 +98,8 @@ const SDMCET_PRESETS = [
 ];
 
 export default function AdminLevels() {
+  const toast = useUiStore((s) => s.toast);
+  const uiConfirm = useUiStore((s) => s.confirm);
   const [game, setGame] = useState<any>(null);
   const [levels, setLevels] = useState<any[]>([]);
   const [zones, setZones] = useState<any[]>([]);
@@ -275,9 +279,9 @@ export default function AdminLevels() {
       }
 
       await reload();
-      alert('✓ Objective saved successfully!');
+      toast('Objective saved successfully.', 'success');
     } catch (err: any) {
-      alert(err.message ?? 'Failed to save objective');
+      toast(err.message ?? 'Failed to save objective', 'error');
     } finally {
       setIsSavingLevel(false);
     }
@@ -292,9 +296,9 @@ export default function AdminLevels() {
         setEditForm(null);
       }
       await reload();
-      alert(`✓ Stage #${lvl.orderIndex} deleted.`);
+      toast(`Stage #${lvl.orderIndex} deleted.`, 'warn');
     } catch (err: any) {
-      alert(err.message ?? 'Failed to delete stage');
+      toast(err.message ?? 'Failed to delete stage', 'error');
     }
   }
 
@@ -315,7 +319,7 @@ export default function AdminLevels() {
       ]);
       await reload();
     } catch (err: any) {
-      alert(err.message ?? 'Failed to reorder stage');
+      toast(err.message ?? 'Failed to reorder stage', 'error');
     }
   }
 
@@ -342,7 +346,7 @@ export default function AdminLevels() {
 
   function handleSavePoolClue(clue: PoolClue) {
     if (!clue.title.trim()) {
-      alert('Please enter a title for the clue.');
+      toast('Please enter a title for the clue.', 'warn');
       return;
     }
 
@@ -361,10 +365,17 @@ export default function AdminLevels() {
       setSelectedPoolIds((prev) => [...prev, clue.id]);
     }
     setEditingPoolClue(null);
+    toast('Saved clue to local pool.', 'success');
   }
 
-  function handleDeletePoolClue(id: string) {
-    if (!confirm('Remove this clue from your pool?')) return;
+  async function handleDeletePoolClue(id: string) {
+    const ok = await uiConfirm({
+      title: 'Remove Clue from Pool?',
+      message: 'This removes the clue from your saved library.',
+      confirmLabel: 'Remove Clue',
+      tone: 'danger',
+    });
+    if (!ok) return;
     const updated = poolClues.filter((c) => c.id !== id);
     setPoolClues(updated);
     savePoolClues(updated);
@@ -372,11 +383,12 @@ export default function AdminLevels() {
     if (editingPoolClue?.id === id) {
       setEditingPoolClue(null);
     }
+    toast('Removed clue from pool.', 'warn');
   }
 
   function handleImportFromActiveGame() {
     if (levels.length === 0) {
-      alert('No active stages to import. Create stages in the Objectives tab first.');
+      toast('No active stages to import. Create stages in Active Stages first.', 'warn');
       return;
     }
 
@@ -398,14 +410,14 @@ export default function AdminLevels() {
     const newItems = imported.filter((c) => !existingTitles.has(c.title.toLowerCase().trim()));
 
     if (newItems.length === 0) {
-      alert('All active game objectives already exist in your Clue Pool.');
+      toast('All active game objectives already exist in your Clue Pool.', 'info');
       return;
     }
 
     const updated = [...poolClues, ...newItems];
     setPoolClues(updated);
     savePoolClues(updated);
-    alert(`✓ Imported ${newItems.length} clues into your Clue Pool!`);
+    toast(`Imported ${newItems.length} clues into your Clue Pool.`, 'success');
   }
 
   function togglePoolSelection(id: string) {
@@ -418,13 +430,16 @@ export default function AdminLevels() {
     if (!game) return;
     const selected = poolClues.filter((c) => selectedPoolIds.includes(c.id));
     if (selected.length === 0) {
-      alert('Please select at least 1 clue from your pool to deploy.');
+      toast('Please select at least 1 clue from your pool to deploy.', 'warn');
       return;
     }
 
-    const ok = confirm(
-      `Deploy ${selected.length} selected clue(s) into the active game?\nThis will configure ${selected.length} stages for current gameplay.`,
-    );
+    const ok = await uiConfirm({
+      title: `Deploy ${selected.length} Clue(s)?`,
+      message: `This will replace the current active stages with ${selected.length} stage(s) configured from your Clue Pool.`,
+      confirmLabel: `Deploy ${selected.length} Stage(s)`,
+      tone: 'default',
+    });
     if (!ok) return;
 
     setIsDeploying(true);
@@ -432,9 +447,9 @@ export default function AdminLevels() {
       const res = await api.deployPool(game.id, selected);
       await reload();
       setStudioMode('level');
-      alert(`✓ Successfully deployed ${res.count || selected.length} clues to the active game!`);
+      toast(`Deployed ${res.count || selected.length} clues to the active game.`, 'success');
     } catch (err: any) {
-      alert(err.message ?? 'Failed to deploy clues');
+      toast(err.message ?? 'Failed to deploy clues', 'error');
     } finally {
       setIsDeploying(false);
     }
@@ -444,7 +459,7 @@ export default function AdminLevels() {
   async function handleSaveZone() {
     if (!game) return;
     if (!zoneLabel.trim()) {
-      alert('Please enter a descriptive name for this zone.');
+      toast('Please enter a descriptive name for this zone.', 'warn');
       return;
     }
 
@@ -452,13 +467,13 @@ export default function AdminLevels() {
 
     if (zoneDrawType === 'quick_radius') {
       if (!zoneCenter) {
-        alert('Please click on the map to set the center point for this zone.');
+        toast('Please click on the map to set the center point for this zone.', 'warn');
         return;
       }
       coordinates = circleToPolygonCoordinates(zoneCenter[0], zoneCenter[1], zoneRadiusMeters);
     } else {
       if (zonePolygonPoints.length < 3) {
-        alert('A polygon boundary requires at least 3 points on the map. Click on the map to add points.');
+        toast('A polygon boundary requires at least 3 points on the map.', 'warn');
         return;
       }
       coordinates = zonePolygonPoints.map(([lat, lng]) => [lng, lat]);
@@ -484,21 +499,28 @@ export default function AdminLevels() {
       setZoneCenter(null);
       setZonePolygonPoints([]);
       await reload();
-      alert('✓ Zone boundary saved successfully!');
+      toast('Zone boundary saved successfully.', 'success');
     } catch (err: any) {
-      alert(err.message ?? 'Failed to save zone');
+      toast(err.message ?? 'Failed to save zone', 'error');
     } finally {
       setIsSavingZone(false);
     }
   }
 
   async function handleDeleteZone(zoneId: number) {
-    if (!confirm('Delete this zone boundary?')) return;
+    const ok = await uiConfirm({
+      title: 'Delete Zone Boundary?',
+      message: 'Squads will no longer trigger geofence alerts or penalties inside this boundary.',
+      confirmLabel: 'Delete Zone',
+      tone: 'danger',
+    });
+    if (!ok) return;
     try {
       await api.deleteZone(zoneId);
       await reload();
+      toast('Zone boundary deleted.', 'warn');
     } catch (err: any) {
-      alert(err.message ?? 'Failed to delete zone');
+      toast(err.message ?? 'Failed to delete zone', 'error');
     }
   }
 
@@ -543,7 +565,7 @@ export default function AdminLevels() {
         </div>
 
         {/* Clean 3-Mode Tab Selector */}
-        <div className="flex items-center gap-1.5 bg-zinc-950 p-1 rounded-xl border border-zinc-800">
+        <div className="flex flex-wrap items-center gap-1.5 bg-zinc-950 p-1 rounded-xl border border-zinc-800">
           <button
             onClick={() => {
               setStudioMode('level');
@@ -555,7 +577,7 @@ export default function AdminLevels() {
                 : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            <span>🎯</span>
+            <MissionIcon className="w-3.5 h-3.5" />
             <span>Active Stages ({levels.length})</span>
           </button>
 
@@ -567,7 +589,7 @@ export default function AdminLevels() {
                 : 'text-zinc-400 hover:text-amber-300'
             }`}
           >
-            <span>🎪</span>
+            <IntelIcon className="w-3.5 h-3.5" />
             <span>Clue Pool ({poolClues.length})</span>
           </button>
 
@@ -582,7 +604,7 @@ export default function AdminLevels() {
                 : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            <span>🚫</span>
+            <ShieldAlertIcon className="w-3.5 h-3.5" />
             <span>Hazard Zones ({zones.length})</span>
           </button>
         </div>
@@ -924,8 +946,8 @@ export default function AdminLevels() {
                             </span>
                             <span className="font-semibold truncate">{lvl.title}</span>
                             {lvl.isFinal && (
-                              <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 font-mono font-bold">
-                                FINALE 🏁
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono font-bold">
+                                FINALE
                               </span>
                             )}
                           </div>
@@ -952,7 +974,7 @@ export default function AdminLevels() {
                               className="w-6 h-6 rounded flex items-center justify-center text-zinc-400 hover:text-rose-400 hover:bg-rose-950/30 transition-all ml-1"
                               title="Delete Stage"
                             >
-                              🗑
+                              <TrashIcon className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         </div>
@@ -1057,8 +1079,9 @@ export default function AdminLevels() {
                         onChange={(e) => setEditForm({ ...editForm, isFinal: e.target.checked })}
                         className="rounded bg-zinc-900 border-zinc-700 text-purple-400"
                       />
-                      <label htmlFor="isFinal" className="text-xs text-zinc-200 font-medium">
-                        🏁 Mark as Grand Finale Objective (Photo Verification)
+                      <label htmlFor="isFinal" className="text-xs text-zinc-200 font-medium flex items-center gap-1.5">
+                        <FlagIcon className="w-3.5 h-3.5 text-purple-300" />
+                        <span>Mark as Grand Finale Objective (Photo Verification)</span>
                       </label>
                     </div>
 
@@ -1127,7 +1150,7 @@ export default function AdminLevels() {
                 <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
                   <div>
                     <span className="text-xs font-mono font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
-                      <span>🎪</span>
+                      <IntelIcon className="w-3.5 h-3.5 text-amber-400" />
                       <span>Clue Pool Bank ({poolClues.length})</span>
                     </span>
                     <p className="text-[11px] text-zinc-400 font-mono mt-0.5">
@@ -1142,7 +1165,7 @@ export default function AdminLevels() {
                       className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-mono rounded-xl border border-zinc-700 transition-all"
                       title="Save active hunt stages into the pool"
                     >
-                      📥 Import Active
+                      Import Active
                     </button>
                     <button
                       type="button"
@@ -1171,7 +1194,7 @@ export default function AdminLevels() {
                       disabled={isDeploying}
                       className="w-full sm:w-auto px-3.5 py-1.5 bg-cyan-400 hover:bg-cyan-300 text-zinc-950 font-mono font-bold text-xs rounded-xl shadow transition-all flex items-center justify-center gap-1.5"
                     >
-                      <span>🚀</span>
+                      <RocketIcon className="w-3.5 h-3.5" />
                       <span>
                         {isDeploying ? 'Deploying…' : `Deploy Selected (${selectedPoolIds.length}) →`}
                       </span>
@@ -1233,8 +1256,8 @@ export default function AdminLevels() {
                               />
                               <span className="font-bold text-white truncate">{clue.title}</span>
                               {clue.isFinal && (
-                                <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 font-mono font-bold shrink-0">
-                                  FINALE 🏁
+                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono font-bold shrink-0">
+                                  FINALE
                                 </span>
                               )}
                             </label>
@@ -1253,7 +1276,7 @@ export default function AdminLevels() {
                                 className="w-6 h-6 rounded flex items-center justify-center text-zinc-500 hover:text-rose-400 hover:bg-rose-950/30 transition-all"
                                 title="Remove Clue"
                               >
-                                🗑
+                                <TrashIcon className="w-3.5 h-3.5" />
                               </button>
                             </div>
                           </div>
@@ -1265,13 +1288,21 @@ export default function AdminLevels() {
                           )}
 
                           <div className="flex flex-wrap items-center gap-2 pl-6 text-[10px] font-mono">
-                            {clue.locationHint && <span className="text-zinc-500">📍 {clue.locationHint}</span>}
+                            {clue.locationHint && (
+                              <span className="text-zinc-500 flex items-center gap-1">
+                                <PinIcon className="w-3 h-3" />
+                                <span>{clue.locationHint}</span>
+                              </span>
+                            )}
                             {clue.answer && (
                               <span className="bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-800 text-cyan-300 font-bold">
                                 KEY: {clue.answer.toUpperCase()}
                               </span>
                             )}
-                            <span className="text-zinc-500">🎯 {clue.triggerRadiusMeters ?? 25}m</span>
+                            <span className="text-zinc-500 flex items-center gap-1">
+                              <MissionIcon className="w-3 h-3" />
+                              <span>{clue.triggerRadiusMeters ?? 25}m</span>
+                            </span>
                           </div>
                         </div>
                       );
@@ -1282,10 +1313,10 @@ export default function AdminLevels() {
 
               {/* Pool Clue Editor / Creator Form */}
               {editingPoolClue && (
-                <div className="bg-zinc-900/90 border border-amber-500/30 rounded-2xl p-4 flex flex-col gap-3.5 shadow-2xl animate-in fade-in duration-150">
+                <div className="bg-zinc-900/90 border border-amber-500/30 rounded-2xl p-4 flex flex-col gap-3.5 shadow-2xl animate-scale-in">
                   <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
                     <span className="text-xs font-mono font-bold text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
-                      <span>✏️</span>
+                      <IntelIcon className="w-3.5 h-3.5" />
                       <span>Configure Pool Clue</span>
                     </span>
                     <button
@@ -1369,8 +1400,9 @@ export default function AdminLevels() {
                           onChange={(e) => setEditingPoolClue({ ...editingPoolClue, isFinal: e.target.checked })}
                           className="rounded bg-zinc-900 border-zinc-700 text-purple-400"
                         />
-                        <label htmlFor="poolIsFinal" className="text-xs text-zinc-200 font-medium">
-                          🏁 Mark as Grand Finale Clue
+                        <label htmlFor="poolIsFinal" className="text-xs text-zinc-200 font-medium flex items-center gap-1.5">
+                          <FlagIcon className="w-3.5 h-3.5 text-purple-300" />
+                          <span>Mark as Grand Finale Clue</span>
                         </label>
                       </div>
 

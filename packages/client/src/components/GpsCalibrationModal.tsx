@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { triggerHaptic } from '../lib/sound';
+import { CheckIcon, MissionIcon, RefreshIcon, SatelliteIcon, XIcon } from './Icons';
 
 interface GpsCalibrationModalProps {
   isOpen: boolean;
@@ -22,7 +23,6 @@ export default function GpsCalibrationModal({
   const accuracy = pos ? Math.round(pos.accuracy) : null;
   const isExcellent = accuracy != null && accuracy <= 10;
   const isFair = accuracy != null && accuracy > 10 && accuracy <= 25;
-  const isPoor = accuracy == null || accuracy > 25;
 
   const accuracyRating = isExcellent ? 'EXCELLENT' : isFair ? 'FAIR / ACCEPTABLE' : 'POOR';
   const accuracyColor = isExcellent
@@ -50,17 +50,17 @@ export default function GpsCalibrationModal({
   return (
     <div
       onClick={onClose}
-      className="fixed inset-0 z-[1600] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200"
+      className="fixed inset-0 z-[1600] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="bg-zinc-950 border border-zinc-800 rounded-3xl p-6 flex flex-col gap-5 max-w-sm w-full shadow-2xl relative select-none font-sans"
+        className="obsidian-surface rounded-3xl p-6 flex flex-col gap-5 max-w-sm w-full relative select-none font-sans animate-scale-in"
       >
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-cyan-950/80 border border-cyan-400/40 flex items-center justify-center text-sm text-cyan-300">
-              🛰️
+            <div className="w-8 h-8 rounded-xl bg-cyan-950/80 border border-cyan-400/40 flex items-center justify-center text-cyan-300">
+              <SatelliteIcon className="w-4 h-4" />
             </div>
             <div>
               <span className="text-[9px] font-mono uppercase tracking-widest text-cyan-400 font-bold block">
@@ -72,17 +72,18 @@ export default function GpsCalibrationModal({
 
           <button
             onClick={onClose}
-            className="w-7 h-7 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white flex items-center justify-center text-xs font-mono transition-colors"
+            aria-label="Close GPS diagnostics"
+            className="w-7 h-7 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white flex items-center justify-center transition-colors"
           >
-            ✕
+            <XIcon className="w-3.5 h-3.5" />
           </button>
         </div>
 
         {/* 1. Live Precision Status Card */}
-        <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-4 flex flex-col gap-2.5">
+        <div className="bg-zinc-900/70 border border-white/[0.06] rounded-2xl p-4 flex flex-col gap-2.5">
           <div className="flex items-center justify-between text-xs font-mono">
-            <span className="text-zinc-400 font-bold uppercase tracking-wider">Positioning Precision:</span>
-            <span className={`px-2 py-0.5 rounded-md font-bold text-[10px] border ${accuracyColor}`}>
+            <span className="text-zinc-400 font-bold uppercase tracking-wider">Precision</span>
+            <span className={`px-2 py-0.5 rounded-md font-bold text-[10px] border tabular-nums ${accuracyColor}`}>
               {accuracyRating} (±{accuracy ?? '?'}m)
             </span>
           </div>
@@ -97,54 +98,57 @@ export default function GpsCalibrationModal({
             />
           </div>
 
-          <div className="flex items-center justify-between text-[10px] font-mono text-zinc-500">
+          <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400">
             <span>Target: &lt; 20m perimeter</span>
-            <span>{pos ? '🟢 Satellite Fix Active' : '🟡 Searching Constellation…'}</span>
+            <span className="flex items-center gap-1.5">
+              <span className={`w-2 h-2 rounded-full ${pos ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+              <span>{pos ? 'Satellite Fix Active' : 'Searching…'}</span>
+            </span>
           </div>
         </div>
 
         {/* 2. Live Coordinates Readout */}
         <div className="grid grid-cols-2 gap-2 text-left font-mono">
-          <div className="bg-zinc-900/50 border border-zinc-800/60 rounded-xl p-2.5">
+          <div className="bg-zinc-900/50 border border-white/[0.06] rounded-xl p-2.5">
             <span className="text-[9px] text-zinc-500 uppercase block">Latitude</span>
-            <span className="text-xs text-white font-bold truncate block">
+            <span className="text-xs text-white font-bold truncate block tabular-nums">
               {pos ? pos.latitude.toFixed(6) : '—'}
             </span>
           </div>
 
-          <div className="bg-zinc-900/50 border border-zinc-800/60 rounded-xl p-2.5">
+          <div className="bg-zinc-900/50 border border-white/[0.06] rounded-xl p-2.5">
             <span className="text-[9px] text-zinc-500 uppercase block">Longitude</span>
-            <span className="text-xs text-white font-bold truncate block">
+            <span className="text-xs text-white font-bold truncate block tabular-nums">
               {pos ? pos.longitude.toFixed(6) : '—'}
             </span>
           </div>
 
-          <div className="bg-zinc-900/50 border border-zinc-800/60 rounded-xl p-2.5">
+          <div className="bg-zinc-900/50 border border-white/[0.06] rounded-xl p-2.5">
             <span className="text-[9px] text-zinc-500 uppercase block">Heading</span>
-            <span className="text-xs text-white font-bold block">
+            <span className="text-xs text-white font-bold block tabular-nums">
               {pos?.heading != null && !isNaN(pos.heading) ? `${Math.round(pos.heading)}°` : 'Compass Mode'}
             </span>
           </div>
 
-          <div className="bg-zinc-900/50 border border-zinc-800/60 rounded-xl p-2.5">
-            <span className="text-[9px] text-zinc-500 uppercase block">Altitude / Speed</span>
-            <span className="text-xs text-white font-bold block">
+          <div className="bg-zinc-900/50 border border-white/[0.06] rounded-xl p-2.5">
+            <span className="text-[9px] text-zinc-500 uppercase block">Altitude</span>
+            <span className="text-xs text-white font-bold block tabular-nums">
               {pos?.altitude ? `${Math.round(pos.altitude)}m` : 'Ground'}
             </span>
           </div>
         </div>
 
         {/* 3. Compass Figure-8 Reset Guide */}
-        <div className="bg-zinc-900/40 border border-zinc-800/60 rounded-2xl p-3.5 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-cyan-950/40 border border-cyan-400/20 flex items-center justify-center text-xl shrink-0 font-mono text-cyan-400">
-            ♾️
+        <div className="bg-zinc-900/40 border border-white/[0.06] rounded-2xl p-3.5 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-cyan-950/40 border border-cyan-400/20 flex items-center justify-center shrink-0 text-cyan-400">
+            <RefreshIcon className="w-4 h-4" />
           </div>
           <div className="text-left">
             <span className="text-[10px] font-mono font-bold text-white uppercase block">
               Compass Sensor Recalibration
             </span>
             <p className="text-[11px] text-zinc-400 leading-tight mt-0.5 font-sans">
-              Wave your phone in an <strong>Infinity (∞) pattern</strong> in the air for 5 seconds to clear magnetic interference from buildings.
+              Wave your phone in a smooth <strong>Figure-8 pattern</strong> for 5 seconds to clear magnetic interference near buildings.
             </p>
           </div>
         </div>
@@ -155,7 +159,7 @@ export default function GpsCalibrationModal({
             type="button"
             disabled={recalibrating}
             onClick={handleForceRecalibrate}
-            className="w-full py-3 px-4 bg-cyan-500 hover:bg-cyan-400 active:scale-95 text-zinc-950 font-black text-xs font-mono uppercase tracking-widest rounded-xl shadow-xl transition-all flex items-center justify-center gap-2"
+            className="w-full py-3 px-4 bg-cyan-400 hover:bg-cyan-300 active:scale-[0.98] disabled:opacity-70 text-zinc-950 font-black text-xs font-mono uppercase tracking-widest rounded-xl shadow-xl transition-all flex items-center justify-center gap-2 min-h-[44px]"
           >
             {recalibrating ? (
               <>
@@ -164,15 +168,16 @@ export default function GpsCalibrationModal({
               </>
             ) : (
               <>
-                <span>🎯</span>
+                <MissionIcon className="w-4 h-4" />
                 <span>FORCE SENSOR RECALIBRATION</span>
               </>
             )}
           </button>
 
           {lastCalibrationTime && (
-            <span className="text-[10px] font-mono text-emerald-400 text-center">
-              ✓ Calibrated at {lastCalibrationTime}
+            <span className="text-[10px] font-mono text-emerald-400 flex items-center justify-center gap-1">
+              <CheckIcon className="w-3 h-3" />
+              <span>Calibrated at {lastCalibrationTime}</span>
             </span>
           )}
         </div>

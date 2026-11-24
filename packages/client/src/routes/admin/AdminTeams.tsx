@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
+import { useUiStore } from '../../stores/uiStore';
+import { AlertTriangleIcon, PrintIcon } from '../../components/Icons';
 
 export default function AdminTeams() {
+  const toast = useUiStore((s) => s.toast);
+  const uiConfirm = useUiStore((s) => s.confirm);
   const [teams, setTeams] = useState<any[]>([]);
   const [game, setGame] = useState<any>(null);
   const [regStatus, setRegStatus] = useState<any>(null);
@@ -57,12 +61,12 @@ export default function AdminTeams() {
         prev.map((t) => (t.id === resetCodeTeam.id ? { ...t, displayCode: res.displayCode } : t)),
       );
       setRecentCredentials((prev) => ({ ...prev, [resetCodeTeam.name]: res.displayCode }));
-      alert(`Access code for "${resetCodeTeam.name}" updated to "${res.displayCode}".`);
+      toast(`Access code updated for "${resetCodeTeam.name}".`, 'success');
       setResetCodeTeam(null);
       setNewCodeInput('');
       await loadTeams();
     } catch (err: any) {
-      alert(err.message ?? 'Failed to update access code');
+      toast(err.message ?? 'Failed to update access code', 'error');
     } finally {
       setIsResettingCode(false);
     }
@@ -97,8 +101,9 @@ export default function AdminTeams() {
       await api.updateGameSettings(game.id, { registrationOpen: nextState });
       setGame((g: any) => ({ ...g, registrationOpen: nextState }));
       if (regStatus) setRegStatus((r: any) => ({ ...r, registrationOpen: nextState }));
+      toast(nextState ? 'Public registration opened.' : 'Public registration locked.', 'info');
     } catch (err: any) {
-      alert(err.message ?? 'Failed to toggle registration');
+      toast(err.message ?? 'Failed to toggle registration', 'error');
     }
   }
 
@@ -148,31 +153,36 @@ export default function AdminTeams() {
   }
 
   async function handleDelete(teamId: number, name: string) {
-    if (
-      !confirm(
-        `Are you sure you want to permanently delete "${name}"? This removes their progress, location logs, and sessions.`,
-      )
-    ) {
-      return;
-    }
+    const confirmed = await uiConfirm({
+      title: `Remove "${name}"?`,
+      message: 'This permanently deletes their progress, GPS trail, photos, and active sessions.',
+      confirmLabel: 'Remove Squad',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
     try {
       await api.deleteTeam(teamId);
       await loadTeams();
+      toast(`Removed team "${name}".`, 'warn');
     } catch (err: any) {
-      alert(err.message ?? 'Failed to delete team');
+      toast(err.message ?? 'Failed to delete team', 'error');
     }
   }
 
   async function handleReset(teamId: number, name: string) {
-    if (!confirm(`Reset game progress for "${name}"? They will restart from Stage 1.`)) {
-      return;
-    }
+    const confirmed = await uiConfirm({
+      title: `Reset Progress for "${name}"?`,
+      message: 'They will restart from Stage 1 on the next kickoff or advance.',
+      confirmLabel: 'Reset Progress',
+      tone: 'amber',
+    });
+    if (!confirmed) return;
     try {
       await api.resetTeamProgress(teamId);
       await loadTeams();
-      alert(`Progress reset for "${name}".`);
+      toast(`Progress reset for "${name}".`, 'success');
     } catch (err: any) {
-      alert(err.message ?? 'Failed to reset team');
+      toast(err.message ?? 'Failed to reset team', 'error');
     }
   }
 
@@ -257,7 +267,7 @@ export default function AdminTeams() {
 
       {/* Expandable Add Team Form Card */}
       {showAddTeam && (
-        <div className="bg-zinc-900/90 border border-cyan-500/30 rounded-2xl p-4 shadow-2xl animate-in fade-in duration-150">
+        <div className="bg-zinc-900/90 border border-cyan-500/30 rounded-2xl p-4 shadow-2xl animate-scale-in">
           <div className="flex items-center justify-between pb-2 mb-3 border-b border-zinc-800">
             <span className="text-xs font-mono font-bold text-white uppercase tracking-wider">
               Enrol New Squad
@@ -271,8 +281,9 @@ export default function AdminTeams() {
           </div>
 
           {formError && (
-            <div className="p-2 mb-3 rounded-lg bg-rose-950/40 border border-rose-500/40 text-rose-300 text-xs font-mono">
-              ⚠️ {formError}
+            <div className="p-2.5 mb-3 rounded-lg bg-rose-950/40 border border-rose-500/40 text-rose-300 text-xs font-mono flex items-center gap-2">
+              <AlertTriangleIcon className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+              <span>{formError}</span>
             </div>
           )}
 
@@ -371,7 +382,7 @@ export default function AdminTeams() {
 
                   {isFinished ? (
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0 font-bold">
-                      FINISHED 🏁
+                      FINISHED
                     </span>
                   ) : (
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 font-bold shrink-0">
@@ -505,9 +516,10 @@ export default function AdminTeams() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => window.print()}
-                  className="px-3 py-1.5 rounded-lg bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-bold font-mono"
+                  className="px-3 py-1.5 rounded-lg bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-bold font-mono flex items-center gap-1.5"
                 >
-                  🖨️ Print
+                  <PrintIcon className="w-3.5 h-3.5" />
+                  <span>Print</span>
                 </button>
                 <button
                   onClick={() => setShowPrintModal(false)}

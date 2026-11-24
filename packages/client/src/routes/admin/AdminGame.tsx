@@ -2,6 +2,8 @@ import { useEffect, useState, useMemo } from 'react';
 import { NavLink } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { getSocket } from '../../lib/socket';
+import { useUiStore } from '../../stores/uiStore';
+import { AlertTriangleIcon } from '../../components/Icons';
 
 export default function AdminGame() {
   const [game, setGame] = useState<any>(null);
@@ -47,6 +49,7 @@ export default function AdminGame() {
   const [newCodeInput, setNewCodeInput] = useState('');
   const [isResettingCode, setIsResettingCode] = useState(false);
   const [copiedTeamId, setCopiedTeamId] = useState<number | null>(null);
+  const toast = useUiStore((s) => s.toast);
 
   function handleCopyCode(teamId: number, code: string) {
     if (!code) return;
@@ -71,12 +74,13 @@ export default function AdminGame() {
     setIsResettingCode(true);
     try {
       const res = await api.resetTeamAccessCode(resetCodeTeam.id, newCodeInput.trim());
-      addLog(`🔑 Access code updated for ${resetCodeTeam.name} to "${res.displayCode}"`, 'warn');
+      addLog(`Access code updated for ${resetCodeTeam.name} to "${res.displayCode}"`, 'warn');
+      toast(`Access code updated for ${resetCodeTeam.name}`, 'success');
       setResetCodeTeam(null);
       setNewCodeInput('');
       await reload();
     } catch (err: any) {
-      alert(err.message ?? 'Failed to update access code');
+      toast(err.message ?? 'Failed to update access code', 'error');
     } finally {
       setIsResettingCode(false);
     }
@@ -116,7 +120,7 @@ export default function AdminGame() {
 
     socket.on('admin:photo_submitted', (data: any) => {
       setPendingPhotosCount((c) => c + 1);
-      addLog(`📸 New verification photo submitted by ${data?.teamName ?? 'Team'}`, 'info');
+      addLog(`New verification photo submitted by ${data?.teamName ?? 'Team'}`, 'info');
     });
 
     socket.on('admin:occupancy_update', (matrix: any[]) => {
@@ -124,7 +128,7 @@ export default function AdminGame() {
     });
 
     socket.on('team:checkpoint_reached', (data: any) => {
-      addLog(`📍 ${data.teamName} reached target for ${data.levelTitle}`, 'success');
+      addLog(`${data.teamName} reached target for ${data.levelTitle}`, 'success');
       reload();
     });
 
@@ -133,7 +137,7 @@ export default function AdminGame() {
     });
 
     socket.on('winner:declared', (data: any) => {
-      addLog(`🏆 WINNER: ${data.teamName} completed the hunt!`, 'success');
+      addLog(`WINNER: ${data.teamName} completed the hunt!`, 'success');
       reload();
     });
 
@@ -185,7 +189,7 @@ export default function AdminGame() {
       await reload();
     } catch (err: any) {
       addLog(`Action failed (${action}): ${err.message}`, 'alert');
-      alert(`Action Failed: ${err.message ?? 'Unknown error'}`);
+      toast(`Action Failed: ${err.message ?? 'Unknown error'}`, 'error');
     } finally {
       setActionRunning(null);
     }
@@ -220,9 +224,10 @@ export default function AdminGame() {
         isTargeted ? Number(broadcastTarget) : undefined,
       );
       addLog(`Broadcast sent: "${broadcastMsg.trim()}"`, 'info');
+      toast('Broadcast transmitted to field.', 'success');
       setBroadcastMsg('');
     } catch (err: any) {
-      alert(err.message ?? 'Transmission failed');
+      toast(err.message ?? 'Transmission failed', 'error');
     } finally {
       setIsBroadcasting(false);
     }
@@ -234,8 +239,9 @@ export default function AdminGame() {
       await api.verifyTeamFinish(teamId);
       await reload();
       addLog(`Podium finish verified for ${teamName}`, 'success');
+      toast(`Verified finish for ${teamName}`, 'success');
     } catch (err: any) {
-      alert(err.message ?? 'Verification failed');
+      toast(err.message ?? 'Verification failed', 'error');
     } finally {
       setActionLoadingTeamId(null);
       setConfirmTeamAction(null);
@@ -246,10 +252,11 @@ export default function AdminGame() {
     setActionLoadingTeamId(teamId);
     try {
       const res = await api.bypassTeamGps(teamId);
-      addLog(`🔓 GPS bypassed for ${teamName}: ${res.levelTitle ?? 'Clue'} decrypted!`, 'success');
+      addLog(`GPS bypassed for ${teamName}: ${res.levelTitle ?? 'Clue'} decrypted`, 'success');
+      toast(`GPS bypassed for ${teamName}`, 'success');
       await reload();
     } catch (err: any) {
-      alert(err.message ?? 'Could not bypass GPS check');
+      toast(err.message ?? 'Could not bypass GPS check', 'error');
     } finally {
       setActionLoadingTeamId(null);
     }
@@ -259,10 +266,11 @@ export default function AdminGame() {
     setActionLoadingTeamId(teamId);
     try {
       const res = await api.forceAdvanceTeam(teamId);
-      addLog(`⏩ Advanced ${teamName} to Stage ${res.nextStepNumber ?? 'Next'}`, 'warn');
+      addLog(`Advanced ${teamName} to Stage ${res.nextStepNumber ?? 'Next'}`, 'warn');
+      toast(`Advanced ${teamName} to Stage ${res.nextStepNumber ?? 'Next'}`, 'info');
       await reload();
     } catch (err: any) {
-      alert(err.message ?? 'Could not advance level');
+      toast(err.message ?? 'Could not advance level', 'error');
     } finally {
       setActionLoadingTeamId(null);
       setConfirmTeamAction(null);
@@ -274,11 +282,12 @@ export default function AdminGame() {
     setActionLoadingTeamId(jumpTeam.id);
     try {
       await api.jumpTeamStage(jumpTeam.id, targetJumpStep);
-      addLog(`🔀 Moved ${jumpTeam.name} to Stage ${targetJumpStep}`, 'warn');
+      addLog(`Moved ${jumpTeam.name} to Stage ${targetJumpStep}`, 'warn');
+      toast(`Moved ${jumpTeam.name} to Stage ${targetJumpStep}`, 'info');
       setJumpTeam(null);
       await reload();
     } catch (err: any) {
-      alert(err.message ?? 'Failed to jump squad stage');
+      toast(err.message ?? 'Failed to jump squad stage', 'error');
     } finally {
       setActionLoadingTeamId(null);
     }
@@ -295,10 +304,11 @@ export default function AdminGame() {
         `${penaltyReason} (by Admin)`,
       );
       addLog(`Adjusted time (${penaltyMinutes > 0 ? '+' : ''}${penaltyMinutes}m) for ${penaltyTeam.name}`, 'warn');
+      toast(`Adjusted time for ${penaltyTeam.name}`, 'info');
       setPenaltyTeam(null);
       await reload();
     } catch (err: any) {
-      alert(err.message ?? 'Failed to apply adjustment');
+      toast(err.message ?? 'Failed to apply adjustment', 'error');
     }
   }
 
@@ -307,10 +317,11 @@ export default function AdminGame() {
     try {
       await api.sendAnnouncement(game.id, nudgeText.trim(), 'nudge', nudgeTeam.id);
       addLog(`Nudge sent to ${nudgeTeam.name}: "${nudgeText.trim()}"`, 'info');
+      toast(`Nudge sent to ${nudgeTeam.name}`, 'success');
       setNudgeTeam(null);
       setNudgeText('');
     } catch (err: any) {
-      alert(err.message ?? 'Failed to transmit nudge');
+      toast(err.message ?? 'Failed to transmit nudge', 'error');
     }
   }
 
@@ -555,7 +566,7 @@ export default function AdminGame() {
             onChange={(e) => setBroadcastTarget(e.target.value === 'all' ? 'all' : Number(e.target.value))}
             className="px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-zinc-200 text-xs font-mono focus:outline-none focus:border-zinc-500"
           >
-            <option value="all">📢 All Teams</option>
+            <option value="all">All Teams</option>
             {teams.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name}
@@ -648,8 +659,8 @@ export default function AdminGame() {
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-white text-sm">{team.name}</span>
                       {isFinished ? (
-                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
-                          FINISHED 🏁
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-bold">
+                          FINISHED
                         </span>
                       ) : (
                         <span className="text-[10px] font-mono text-zinc-300 bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800">
@@ -916,8 +927,8 @@ export default function AdminGame() {
         <div className="fixed inset-0 z-[9999] bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 max-w-md w-full shadow-2xl flex flex-col gap-4 text-zinc-100">
             <div className="flex items-center gap-3">
-              <span className="w-10 h-10 rounded-2xl bg-rose-950 border border-rose-500/50 flex items-center justify-center text-xl shrink-0">
-                {confirmAction === 'end' ? '⏹' : '⚠️'}
+              <span className="w-10 h-10 rounded-2xl bg-rose-950 border border-rose-500/50 flex items-center justify-center text-rose-400 shrink-0">
+                <AlertTriangleIcon className="w-5 h-5" />
               </span>
               <div>
                 <h3 className="text-base font-bold text-white">
