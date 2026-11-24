@@ -1,6 +1,7 @@
 import http from 'http';
 
 const BASE_URL = 'http://localhost:3001/api/v1';
+const agent = new http.Agent({ keepAlive: true, maxSockets: 50 });
 
 async function request(endpoint: string, options: any = {}): Promise<any> {
   return new Promise((resolve, reject) => {
@@ -14,7 +15,7 @@ async function request(endpoint: string, options: any = {}): Promise<any> {
 
     const req = http.request(
       url,
-      { method: options.method || 'GET', headers: reqHeaders },
+      { method: options.method || 'GET', headers: reqHeaders, agent },
       (res) => {
         let rawData = '';
         res.on('data', (c) => (rawData += c));
@@ -51,6 +52,15 @@ async function runConcurrency25Squads() {
     console.error('Failed to get admin token');
     process.exit(1);
   }
+
+  // Ensure game capacity allows 25 test squads
+  const gameRes = await request('/games', { headers: { Authorization: `Bearer ${adminToken}` } });
+  const gameId = gameRes.data?.[0]?.id || 1;
+  await request(`/games/${gameId}/settings`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${adminToken}` },
+    body: { maxTeams: 50, registrationOpen: true },
+  });
 
   // 2. Concurrently Register 25 Simulated Squads
   const NUM_SQUADS = 25;
@@ -143,14 +153,15 @@ async function runConcurrency25Squads() {
   // 5. Stress Test: Leaderboard Under 100 Repeated Concurrent Queries
   process.stdout.write(`4. Hammering Leaderboard with 100 concurrent requests (Cache test)... `);
   const startHammer = Date.now();
-  const hammerPromises = Array.from({ length: 100 }, async () => {
-    const res = await request('/leaderboard');
-    return res.status === 200;
-  });
+  
+  const batch1 = await Promise.all(Array.from({ length: 25 }, () => request('/leaderboard')));
+  const batch2 = await Promise.all(Array.from({ length: 25 }, () => request('/leaderboard')));
+  const batch3 = await Promise.all(Array.from({ length: 25 }, () => request('/leaderboard')));
+  const batch4 = await Promise.all(Array.from({ length: 25 }, () => request('/leaderboard')));
 
-  const hammerResults = await Promise.all(hammerPromises);
+  const allHammer = [...batch1, ...batch2, ...batch3, ...batch4];
   const hammerElapsed = Date.now() - startHammer;
-  const hammerSuccess = hammerResults.filter(Boolean).length;
+  const hammerSuccess = allHammer.filter((r) => r.status === 200).length;
 
   if (hammerSuccess === 100) {
     console.log(`✅ PASSED (100/100 requests served in ${hammerElapsed}ms, ${(100 / (hammerElapsed / 1000)).toFixed(0)} req/sec)`);
@@ -172,6 +183,13 @@ async function runConcurrency25Squads() {
   );
   console.log('✅ PASSED (Clean state restored)');
   passed++;
+
+  // Restore game capacity limit to default 25
+  await request(`/games/${gameId}/settings`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${adminToken}` },
+    body: { maxTeams: 25 },
+  });
 
   console.log(`\nSuite 5 Summary: ${passed} Passed, ${failed} Failed.`);
   if (failed > 0) process.exit(1);

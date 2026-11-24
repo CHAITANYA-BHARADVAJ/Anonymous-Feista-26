@@ -201,22 +201,37 @@ export default function AdminTeams() {
           {/* Registration toggle pill */}
           <button
             onClick={handleToggleRegistration}
-            className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-all border ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-all border flex items-center gap-1.5 active:scale-95 ${
               game?.registrationOpen
                 ? 'bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border-emerald-500/40'
                 : 'bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border-rose-500/40'
             }`}
           >
-            {game?.registrationOpen ? '🟢 Public Reg: Open' : '🔴 Public Reg: Locked'}
+            <span className={`w-2 h-2 rounded-full ${game?.registrationOpen ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
+            <span>{game?.registrationOpen ? 'Public Reg: Open' : 'Public Reg: Locked'}</span>
           </button>
 
           {/* Copy Reg URL */}
           <button
             onClick={handleCopyRegLink}
-            className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-mono text-zinc-200 border border-zinc-700 transition-all flex items-center gap-1.5"
+            className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-mono text-zinc-200 border border-zinc-700 transition-all flex items-center gap-1.5 active:scale-95"
             title="Copy Public Registration URL"
           >
-            <span>{copiedLink ? '✓ Copied' : '📋 Link'}</span>
+            {copiedLink ? (
+              <>
+                <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                </svg>
+                <span className="text-emerald-400">Copied</span>
+              </>
+            ) : (
+              <>
+                <svg className="w-3.5 h-3.5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                </svg>
+                <span>Registration Link</span>
+              </>
+            )}
           </button>
 
           {/* Add Team Button */}
@@ -230,9 +245,12 @@ export default function AdminTeams() {
           {/* Print Slips */}
           <button
             onClick={() => setShowPrintModal(true)}
-            className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-medium text-zinc-300 border border-zinc-700 transition-all flex items-center gap-1.5"
+            className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-medium text-zinc-300 border border-zinc-700 transition-all flex items-center gap-1.5 active:scale-95"
           >
-            <span>🖨️ Slips</span>
+            <svg className="w-3.5 h-3.5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+            </svg>
+            <span>Print Slips</span>
           </button>
         </div>
       </div>

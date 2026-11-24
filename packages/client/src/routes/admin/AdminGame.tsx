@@ -392,9 +392,11 @@ export default function AdminGame() {
               <button
                 onClick={() => executeGameAction('pause')}
                 disabled={Boolean(actionRunning)}
-                className="px-3 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-xs border border-amber-500/40 transition-all flex items-center gap-1.5"
+                className="px-3 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-xs border border-amber-500/40 transition-all flex items-center gap-1.5 active:scale-95"
               >
-                <span>⏸</span>
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 9v6m4-6v6" />
+                </svg>
                 <span>Pause</span>
               </button>
             )}
@@ -403,9 +405,11 @@ export default function AdminGame() {
               <button
                 onClick={() => executeGameAction('resume')}
                 disabled={Boolean(actionRunning)}
-                className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-xs transition-all flex items-center gap-1.5 shadow"
+                className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-xs transition-all flex items-center gap-1.5 shadow active:scale-95"
               >
-                <span>▶</span>
+                <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
                 <span>Resume</span>
               </button>
             )}
@@ -414,9 +418,11 @@ export default function AdminGame() {
               <button
                 onClick={() => setConfirmAction('end')}
                 disabled={Boolean(actionRunning)}
-                className="px-3 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 font-bold text-xs border border-rose-700/60 transition-all flex items-center gap-1"
+                className="px-3 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 font-bold text-xs border border-rose-700/60 transition-all flex items-center gap-1 active:scale-95"
               >
-                <span>⏹</span>
+                <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24">
+                  <rect x="6" y="6" width="12" height="12" rx="1.5" />
+                </svg>
                 <span>End</span>
               </button>
             )}
@@ -669,9 +675,24 @@ export default function AdminGame() {
                         <button
                           type="button"
                           onClick={() => handleCopyCode(team.id, team.displayCode)}
-                          className="text-[10px] text-zinc-400 hover:text-white px-1 py-0.5 rounded bg-zinc-800"
+                          className="text-[10px] text-zinc-400 hover:text-white px-1.5 py-0.5 rounded bg-zinc-800 transition-colors flex items-center gap-1"
+                          title="Copy access code"
                         >
-                          {copiedTeamId === team.id ? '✓' : 'Copy'}
+                          {copiedTeamId === team.id ? (
+                            <>
+                              <svg className="w-3 h-3 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                              </svg>
+                              <span className="text-emerald-400">Copied</span>
+                            </>
+                          ) : (
+                            <>
+                              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                              </svg>
+                              <span>Copy</span>
+                            </>
+                          )}
                         </button>
                       )}
 
@@ -692,17 +713,23 @@ export default function AdminGame() {
                           <button
                             onClick={() => setConfirmTeamAction({ type: 'finish', team })}
                             disabled={isLoadingThis}
-                            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-all shadow"
+                            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-all shadow flex items-center gap-1.5"
                           >
-                            {isLoadingThis ? 'Verifying…' : 'Verify Finish 🏁'}
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                            </svg>
+                            <span>{isLoadingThis ? 'Verifying…' : 'Verify Finish'}</span>
                           </button>
                         ) : (
                           <button
                             onClick={() => setConfirmTeamAction({ type: 'advance', team })}
                             disabled={isLoadingThis}
-                            className="px-3 py-1.5 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 font-bold text-xs transition-all active:scale-95 shadow"
+                            className="px-3 py-1.5 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 font-bold text-xs transition-all active:scale-95 shadow flex items-center gap-1"
                           >
-                            <span>Advance ➔</span>
+                            <span>Advance</span>
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                            </svg>
                           </button>
                         )}
 
@@ -710,77 +737,93 @@ export default function AdminGame() {
                         <div className="relative">
                           <button
                             onClick={() => setOpenMenuTeamId(isMenuOpen ? null : team.id)}
-                            className="px-2.5 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-mono text-xs border border-zinc-700 transition-all flex items-center gap-1"
+                            className="px-2.5 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-mono text-xs border border-zinc-700 transition-all flex items-center gap-1 active:scale-95"
                             title="More squad actions"
                           >
-                            <span>Actions ▾</span>
+                            <span>Actions</span>
+                            <svg className={`w-3 h-3 transition-transform ${isMenuOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
                           </button>
 
-                          {/* Popover Menu */}
+                          {/* Popover Menu with backdrop */}
                           {isMenuOpen && (
-                            <div className="absolute right-0 top-full mt-1.5 w-48 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl p-1 z-50 flex flex-col gap-1 text-xs font-mono">
-                              {!reachedLocation && (
+                            <>
+                              <div className="fixed inset-0 z-40" onClick={() => setOpenMenuTeamId(null)} />
+                              <div className="absolute right-0 top-full mt-1.5 w-48 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl p-1 z-50 flex flex-col gap-0.5 text-xs font-mono animate-fade-in">
+                                {!reachedLocation && (
+                                  <button
+                                    onClick={() => {
+                                      setOpenMenuTeamId(null);
+                                      handleBypassGps(team.id, team.name);
+                                    }}
+                                    className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-emerald-950/40 text-emerald-300 flex items-center gap-2 transition-colors"
+                                  >
+                                    <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                                    </svg>
+                                    <span>Bypass GPS</span>
+                                  </button>
+                                )}
+
                                 <button
                                   onClick={() => {
                                     setOpenMenuTeamId(null);
-                                    handleBypassGps(team.id, team.name);
+                                    setJumpTeam(team);
+                                    setTargetJumpStep(Math.min(10, currentLevelOrder + 1));
                                   }}
-                                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-zinc-800 text-emerald-300 flex items-center gap-2"
+                                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-zinc-800 text-zinc-200 flex items-center gap-2 transition-colors"
                                 >
-                                  <span>🔓</span>
-                                  <span>Bypass GPS</span>
+                                  <svg className="w-3.5 h-3.5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                                  </svg>
+                                  <span>Jump Stage…</span>
                                 </button>
-                              )}
 
-                              <button
-                                onClick={() => {
-                                  setOpenMenuTeamId(null);
-                                  setJumpTeam(team);
-                                  setTargetJumpStep(Math.min(10, currentLevelOrder + 1));
-                                }}
-                                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-zinc-800 text-zinc-200 flex items-center gap-2"
-                              >
-                                <span>🔀</span>
-                                <span>Jump Stage…</span>
-                              </button>
+                                <button
+                                  onClick={() => {
+                                    setOpenMenuTeamId(null);
+                                    setPenaltyTeam(team);
+                                    setPenaltyMinutes(5);
+                                    setPenaltyReason('Time adjustment');
+                                  }}
+                                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-zinc-800 text-zinc-200 flex items-center gap-2 transition-colors"
+                                >
+                                  <svg className="w-3.5 h-3.5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                  </svg>
+                                  <span>Adjust Time</span>
+                                </button>
 
-                              <button
-                                onClick={() => {
-                                  setOpenMenuTeamId(null);
-                                  setPenaltyTeam(team);
-                                  setPenaltyMinutes(5);
-                                  setPenaltyReason('Time adjustment');
-                                }}
-                                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-zinc-800 text-zinc-200 flex items-center gap-2"
-                              >
-                                <span>⏱️</span>
-                                <span>Adjust Time</span>
-                              </button>
+                                <button
+                                  onClick={() => {
+                                    setOpenMenuTeamId(null);
+                                    setNudgeTeam(team);
+                                    setNudgeText('');
+                                  }}
+                                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-cyan-950/40 text-cyan-300 flex items-center gap-2 transition-colors"
+                                >
+                                  <svg className="w-3.5 h-3.5 text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                                  </svg>
+                                  <span>Radio Nudge</span>
+                                </button>
 
-                              <button
-                                onClick={() => {
-                                  setOpenMenuTeamId(null);
-                                  setNudgeTeam(team);
-                                  setNudgeText('');
-                                }}
-                                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-zinc-800 text-cyan-300 flex items-center gap-2"
-                              >
-                                <span>📡</span>
-                                <span>Radio Nudge</span>
-                              </button>
-
-                              <button
-                                onClick={() => {
-                                  setOpenMenuTeamId(null);
-                                  setResetCodeTeam(team);
-                                  setNewCodeInput('');
-                                }}
-                                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-zinc-800 text-amber-300 flex items-center gap-2 border-t border-zinc-800"
-                              >
-                                <span>🔑</span>
-                                <span>Reset Code</span>
-                              </button>
-                            </div>
+                                <button
+                                  onClick={() => {
+                                    setOpenMenuTeamId(null);
+                                    setResetCodeTeam(team);
+                                    setNewCodeInput('');
+                                  }}
+                                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-amber-950/40 text-amber-300 flex items-center gap-2 border-t border-zinc-800/80 transition-colors"
+                                >
+                                  <svg className="w-3.5 h-3.5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                                  </svg>
+                                  <span>Reset Code</span>
+                                </button>
+                              </div>
+                            </>
                           )}
                         </div>
                       </>

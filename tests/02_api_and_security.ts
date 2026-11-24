@@ -64,6 +64,7 @@ async function runApiAndSecurityTests() {
   let failed = 0;
   let adminToken = '';
   let teamToken = '';
+  let testSquadId = 0;
   let activeGameId = 1;
   const testSquadName = `Test Squad ${Date.now()}`;
   const testSquadCode = 'testpass123';
@@ -149,6 +150,7 @@ async function runApiAndSecurityTests() {
     });
     if ((res.status === 200 || res.status === 201) && res.data?.token) {
       teamToken = res.data.token;
+      testSquadId = res.data.teamId;
       console.log('✅ PASSED (201 Created, Registered)');
       passed++;
     } else {
@@ -326,6 +328,26 @@ async function runApiAndSecurityTests() {
   } catch (err: any) {
     console.log('❌ FAILED\n', err.message);
     failed++;
+  }
+
+  // 14. Clean up test squad (ensures zero residual test records)
+  if (testSquadId) {
+    try {
+      process.stdout.write('14. Cleaning up Temporary Test Squad... ');
+      const delSquadRes = await request(`/admin/teams/${testSquadId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      if (delSquadRes.status === 200 && delSquadRes.data?.ok === true) {
+        console.log('✅ PASSED');
+        passed++;
+      } else {
+        throw new Error(`Expected 200 {ok: true}, got ${delSquadRes.status}`);
+      }
+    } catch (err: any) {
+      console.log('❌ FAILED\n', err.message);
+      failed++;
+    }
   }
 
   console.log(`\nSuite 2 Summary: ${passed} Passed, ${failed} Failed.`);

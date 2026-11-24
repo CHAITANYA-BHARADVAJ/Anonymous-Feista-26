@@ -278,6 +278,12 @@ export default function AdminMap() {
     }
   }
 
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'warn' } | null>(null);
+  function showToast(message: string, type: 'success' | 'warn' = 'success') {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  }
+
   function handleCopyCode(teamId: number, code: string) {
     if (!code) return;
     navigator.clipboard.writeText(code);
@@ -293,11 +299,11 @@ export default function AdminMap() {
     setIsSendingNudge(true);
     try {
       await api.sendAnnouncement(game.id, nudgeMessage.trim(), 'nudge', nudgeTeam.id);
-      alert(`Nudge transmitted to ${nudgeTeam.name}!`);
+      showToast(`Nudge transmitted to ${nudgeTeam.name}!`, 'success');
       setNudgeTeam(null);
       setNudgeMessage('');
     } catch (err: any) {
-      alert(err.message ?? 'Failed to send nudge');
+      showToast(err.message ?? 'Failed to send nudge', 'warn');
     } finally {
       setIsSendingNudge(false);
     }
@@ -312,6 +318,20 @@ export default function AdminMap() {
 
   return (
     <div className="relative w-full h-[calc(100vh-3.5rem)] md:h-screen bg-zinc-950 text-zinc-100 flex overflow-hidden select-none">
+      {/* Toast Feedback */}
+      {toast && (
+        <div className="fixed top-16 right-6 z-[2000] animate-fade-in pointer-events-none">
+          <div
+            className={`px-4 py-2.5 rounded-xl border shadow-2xl flex items-center gap-2.5 text-xs font-medium backdrop-blur-xl ${
+              toast.type === 'success'
+                ? 'bg-emerald-950/90 border-emerald-500/40 text-emerald-200 shadow-emerald-950/50'
+                : 'bg-zinc-900/90 border-amber-500/40 text-amber-200 shadow-black/80'
+            }`}
+          >
+            <span>{toast.message}</span>
+          </div>
+        </div>
+      )}
       {/* =========================================================================
           FULL-SCREEN INTERACTIVE SATELLITE MAP (NO BLOCKING ROSTER DRAWER)
           ========================================================================= */}
@@ -649,10 +669,10 @@ export default function AdminMap() {
                     onClick={async () => {
                       try {
                         const res = await api.bypassTeamGps(activeFocusTeam.id);
-                        alert(`GPS bypassed! Clue "${res.levelTitle ?? 'Target'}" unlocked for ${activeFocusTeam.name}.`);
+                        showToast(`GPS bypassed! Clue "${res.levelTitle ?? 'Target'}" unlocked for ${activeFocusTeam.name}.`, 'success');
                         reloadTeams();
                       } catch (err: any) {
-                        alert(err.message ?? 'Bypass failed');
+                        showToast(err.message ?? 'Bypass failed', 'warn');
                       }
                     }}
                     className="flex-1 py-1.5 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/30 text-[11px] font-mono font-bold transition-all"
@@ -664,13 +684,13 @@ export default function AdminMap() {
                     onClick={async () => {
                       try {
                         const res = await api.forceAdvanceTeam(activeFocusTeam.id);
-                        alert(`Advanced ${activeFocusTeam.name} to Step ${res.nextStepNumber ?? 'Next'}!`);
+                        showToast(`Advanced ${activeFocusTeam.name} to Step ${res.nextStepNumber ?? 'Next'}!`, 'success');
                         reloadTeams();
                       } catch (err: any) {
-                        alert(err.message ?? 'Advance failed');
+                        showToast(err.message ?? 'Advance failed', 'warn');
                       }
                     }}
-                    className="flex-1 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-100 text-[11px] font-mono font-bold transition-all"
+                    className="flex-1 py-1.5 rounded-lg bg-zinc-100 hover:bg-white text-zinc-950 text-[11px] font-mono font-bold transition-all shadow"
                     title="Advance to next stage"
                   >
                     Advance ➔
