@@ -42,6 +42,7 @@ import ZoneWarning from '../../components/ZoneWarning';
 import AnnouncementBanner from '../../components/AnnouncementBanner';
 import PaVoiceBanner from '../../components/PaVoiceBanner';
 import {
+  AlertTriangleIcon,
   CameraIcon,
   CheckIcon,
   ChevronUpIcon,
@@ -112,8 +113,12 @@ export default function PlayDashboard() {
   const game = useGameStore((s) => s.game);
   const currentLevel = useGameStore((s) => s.currentLevel)();
   const progress = useGameStore((s) => s.progress);
+  const totalSteps = useGameStore((s) => s.totalSteps);
   const rankings = useGameStore((s) => s.rankings);
   const setProgress = useGameStore((s) => s.setProgress);
+  const setTotalSteps = useGameStore((s) => s.setTotalSteps);
+  const latestPhoto = useGameStore((s) => s.latestPhoto);
+  const setLatestPhoto = useGameStore((s) => s.setLatestPhoto);
   const connected = useGameStore((s) => s.connected);
 
   const teamName = useAuthStore((s) => s.teamName);
@@ -144,8 +149,8 @@ export default function PlayDashboard() {
   const [hintLoading, setHintLoading] = useState<number | null>(null);
   const [checkInLoading, setCheckInLoading] = useState(false);
   const [photoUploading, setPhotoUploading] = useState(false);
-  const [photoUploaded, setPhotoUploaded] = useState(false);
   const [photoError, setPhotoError] = useState('');
+  const photoStatus = latestPhoto?.status ?? null;
 
   // Map & Level Derived
   const activeSource = SATELLITE_SOURCES[selectedSourceKey] ?? SATELLITE_SOURCES.google;
@@ -158,7 +163,7 @@ export default function PlayDashboard() {
   const isCompleted = !!currentLevel?.completedAt;
   const completedCount = progress.filter((p) => p.completedAt).length;
   const currentStep = (currentLevel as any)?.stepNumber ?? (completedCount + 1);
-  const isFinalStep = Boolean(level?.isFinal || currentStep >= 10);
+  const isFinalStep = Boolean(level?.isFinal || currentStep >= totalSteps);
 
   // Check verified podium finish from live rankings
   const myRanking = useMemo(
@@ -183,12 +188,12 @@ export default function PlayDashboard() {
     }
   }, [currentLevel?.levelId]);
 
-  // Expand sheet when verified finish arrives
+  // Expand sheet when verified finish arrives or when a submitted photo is rejected
   useEffect(() => {
-    if (isVerifiedFinished) {
+    if (isVerifiedFinished || latestPhoto?.status === 'rejected') {
       setIsSheetExpanded(true);
     }
-  }, [isVerifiedFinished]);
+  }, [isVerifiedFinished, latestPhoto?.status, latestPhoto?.id]);
 
   // Fullscreen tracking & Squid Game PA intro briefing on portal entry
   useEffect(() => {
@@ -273,6 +278,7 @@ export default function PlayDashboard() {
       triggerHaptic();
       const updated = await api.getParticipantGame();
       setProgress(updated.progress);
+      if (typeof updated.totalSteps === 'number' && updated.totalSteps > 0) setTotalSteps(updated.totalSteps);
       setShowClueModal(true);
       setIsSheetExpanded(true);
     } catch (err: any) {
@@ -317,12 +323,19 @@ export default function PlayDashboard() {
         if (useVoiceStore.getState().muted) {
           playSuccessSound();
         } else {
-          announceStageAdvance(res.stepNumber, Boolean(res.stepNumber && res.stepNumber >= 10));
+          announceStageAdvance(
+            res.stepNumber,
+            Boolean(res.isFinal || (res.stepNumber && res.stepNumber >= (res.totalSteps ?? totalSteps))),
+          );
         }
         triggerHaptic([80, 50, 120]);
-        toast('Passcode verified — advancing to next stage!', 'success');
+        toast(
+          res.finished ? 'Passphrase verified — finish locked!' : 'Passcode verified — advancing to next stage!',
+          'success',
+        );
         const data = await api.getParticipantGame();
         setProgress(data.progress);
+        if (typeof data.totalSteps === 'number' && data.totalSteps > 0) setTotalSteps(data.totalSteps);
         if (res.finished) {
           triggerHaptic([200, 100, 200, 100, 500]);
         }
@@ -386,8 +399,113 @@ export default function PlayDashboard() {
     sessionStorage.removeItem('ch-pa-intro-done');
     await api.logout().catch(() => {});
     clearAuth();
+    setLatestPhoto(null);
     disconnectSocket();
     navigate('/login');
+  }
+
+  function renderVictoryPhotoSection() {
+    const isRejected = photoStatus === 'rejected';
+    const isApproved = photoStatus === 'approved';
+    const isPending = photoStatus === 'pending';
+
+    return (
+      <div className="pt-2 flex flex-col items-center gap-2.5 border-t border-white/[0.06] w-full">
+        <span className="text-[10px] font-mono uppercase tracking-wider text-zinc-400">
+          {isRejected ? 'Verification Photo Rejected — Action Required' : 'Victory Photo Proof'}
+        </span>
+
+        {isRejected && (
+          <div className="w-full bg-rose-950/60 border border-rose-500/45 rounded-xl p-3 text-left flex items-start gap-2.5">
+            <AlertTriangleIcon className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+            <div className="flex flex-col gap-0.5 min-w-0">
+              <span className="text-[11px] font-mono font-bold text-rose-300 uppercase tracking-wide">
+                Photo Rejected by Event Control
+              </span>
+              <p className="text-xs text-rose-100/90 break-words leading-snug">
+                {latestPhoto?.reviewNote?.trim()
+                  ? `Reason: ${latestPhoto.reviewNote}`
+                  : 'Coordinators rejected your submission. Please snap a clearer photo and resubmit.'}
+              </p>
+            </div>
+          </div>
+        )}
+
+        <label
+          className={`cursor-pointer py-2.5 px-4 rounded-xl active:scale-[0.98] font-mono font-bold text-xs transition-all flex items-center gap-2 min-h-[42px] border ${
+            isRejected
+              ? 'bg-rose-500 hover:bg-rose-400 border-rose-300 text-zinc-950 shadow-lg shadow-rose-500/20'
+              : 'bg-zinc-800 hover:bg-zinc-700 border-white/10 text-zinc-100'
+          }`}
+        >
+          {isApproved ? (
+            <CheckIcon className="w-4 h-4 text-emerald-400" />
+          ) : (
+            <CameraIcon className={`w-4 h-4 ${isRejected ? 'text-zinc-950' : 'text-cyan-300'}`} />
+          )}
+          <span>
+            {photoUploading
+              ? 'TRANSMITTING PHOTO…'
+              : isRejected
+              ? 'RE-TAKE & RESUBMIT PHOTO'
+              : isApproved
+              ? 'PHOTO APPROVED (TAP TO RE-TAKE)'
+              : isPending
+              ? 'PHOTO PENDING REVIEW (TAP TO RE-TAKE)'
+              : 'SNAP & TRANSMIT PHOTO'}
+          </span>
+          <input
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            disabled={photoUploading}
+            onChange={async (e) => {
+              const input = e.currentTarget;
+              const file = input.files?.[0];
+              if (!file) return;
+              setPhotoError('');
+              setPhotoUploading(true);
+              try {
+                const fd = new FormData();
+                fd.append('photo', file);
+                const uploaded = await api.uploadPhoto(fd);
+                setLatestPhoto({
+                  id: uploaded.id,
+                  status: uploaded.status ?? 'pending',
+                  reviewNote: uploaded.reviewNote ?? null,
+                  submittedAt: uploaded.submittedAt ?? new Date().toISOString(),
+                  reviewedAt: uploaded.reviewedAt ?? null,
+                });
+                playSuccessSound();
+                triggerHaptic();
+                toast('Victory photo transmitted to Event Control!', 'success');
+              } catch (err: any) {
+                setPhotoError(err.message ?? 'Photo upload failed');
+              } finally {
+                setPhotoUploading(false);
+                input.value = '';
+              }
+            }}
+          />
+        </label>
+
+        {photoError && <p className="text-rose-400 text-xs font-mono">{photoError}</p>}
+
+        {isPending && (
+          <p className="text-amber-300 text-[11px] font-mono flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+            <span>Transmitted — awaiting coordinator approval…</span>
+          </p>
+        )}
+        {isApproved && (
+          <p className="text-emerald-400 text-[11px] font-mono flex items-center gap-1">
+            <CheckIcon className="w-3.5 h-3.5" />
+            <span>Victory photo approved by Event Control!</span>
+          </p>
+        )}
+      </div>
+    );
   }
 
   // Map overlays
@@ -399,7 +517,7 @@ export default function PlayDashboard() {
     } catch {}
   }
 
-  const totalLevels = Math.max(progress.length, 10);
+  const totalLevels = Math.max(progress.length, totalSteps);
 
   return (
     <div className="relative w-full h-[100dvh] bg-[#07080b] text-zinc-100 font-sans overflow-hidden select-none">
@@ -716,8 +834,8 @@ export default function PlayDashboard() {
                 {isVerifiedFinished
                   ? 'COMPLETE'
                   : isFinalStep
-                  ? 'FINALE'
-                  : `STAGE ${String(currentStep).padStart(2, '0')} / 10`}
+                  ? 'FINAL LOCATION'
+                  : `STAGE ${String(currentStep).padStart(2, '0')} / ${totalSteps}`}
               </span>
               <span className="text-xs font-mono font-bold text-white truncate max-w-[175px]">
                 {isVerifiedFinished
@@ -727,6 +845,11 @@ export default function PlayDashboard() {
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
+              {photoStatus === 'rejected' && (
+                <span className="text-[9px] font-mono tracking-wider uppercase bg-rose-500/15 border border-rose-500/45 text-rose-300 px-2 py-0.5 rounded-md font-bold animate-pulse">
+                  PHOTO REJECTED
+                </span>
+              )}
               {isVerifiedFinished ? (
                 <span className="text-[9px] font-mono tracking-wider uppercase bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 px-2 py-0.5 rounded-md font-bold">
                   FINISHED
@@ -789,6 +912,8 @@ export default function PlayDashboard() {
                       </span>
                     </div>
                   </div>
+
+                  {latestPhoto && renderVictoryPhotoSection()}
                 </div>
               ) : !currentLevel ? (
                 /* Standby State before Kickoff */
@@ -934,7 +1059,7 @@ export default function PlayDashboard() {
                     </div>
                   )}
 
-                  {/* 5. Mission Solution Decoder Form OR Finale Photo Upload */}
+                  {/* 5. Mission Solution Decoder Form OR Finale Rendezvous */}
                   {level?.isFinal ? (
                     <div className="bg-zinc-900/80 border border-emerald-500/45 rounded-2xl p-4 text-center flex flex-col gap-3 shadow-xl">
                       <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/40 flex items-center justify-center text-emerald-400 mx-auto">
@@ -942,63 +1067,38 @@ export default function PlayDashboard() {
                       </div>
                       <div>
                         <h3 className="text-sm font-black text-white uppercase tracking-wider font-mono">
-                          GRAND FINALE OBJECTIVE
+                          FINAL LOCATION // SPORTS COMPLEX
                         </h3>
-                        <p className="text-xs text-zinc-300 leading-relaxed mt-1 max-w-xs mx-auto">
-                          1. Intercept target operative at Amphitheatre.<br />
-                          2. Capture live photo together.<br />
-                          3. Sprint to <strong className="text-white">Start Venue</strong> and present proof.
+                        <p className="text-xs text-zinc-300 leading-relaxed mt-1.5 max-w-xs mx-auto">
+                          1. Scan Wi-Fi for <strong className="text-cyan-300">WHO_AM_I_NODE</strong> near courts.<br />
+                          2. Locate Target Volunteer with <strong className="text-rose-300">red clipboard</strong> on bleachers.<br />
+                          3. Speak exact passphrase aloud &amp; verify below to stop the clock!
                         </p>
                       </div>
 
-                      <div className="pt-1 flex flex-col items-center gap-2">
-                        <label className="cursor-pointer py-3 px-5 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-[0.98] text-zinc-950 font-mono font-black text-xs shadow-lg shadow-emerald-500/20 transition-all flex items-center gap-2 min-h-[44px]">
-                          {photoUploaded ? (
-                            <CheckIcon className="w-4 h-4" />
-                          ) : (
-                            <CameraIcon className="w-4 h-4" />
-                          )}
-                          <span>
-                            {photoUploading
-                              ? 'TRANSMITTING PHOTO…'
-                              : photoUploaded
-                              ? 'PHOTO TRANSMITTED (TAP TO RE-TAKE)'
-                              : 'SNAP & TRANSMIT PHOTO'}
-                          </span>
+                      {!isCompleted && Boolean(level.answer?.trim()) && (
+                        <form onSubmit={submitAnswer} className="flex flex-col gap-2 pt-1 text-left">
                           <input
-                            type="file"
-                            accept="image/*"
-                            capture="environment"
-                            className="hidden"
-                            disabled={photoUploading}
-                            onChange={async (e) => {
-                              const file = e.target.files?.[0];
-                              if (!file) return;
-                              setPhotoError('');
-                              setPhotoUploading(true);
-                              try {
-                                const fd = new FormData();
-                                fd.append('photo', file);
-                                await api.uploadPhoto(fd);
-                                setPhotoUploaded(true);
-                                triggerHaptic();
-                                toast('Finale photo uploaded — sprint to Start Venue!', 'success');
-                              } catch (err: any) {
-                                setPhotoError(err.message ?? 'Photo upload failed');
-                              } finally {
-                                setPhotoUploading(false);
-                              }
-                            }}
+                            type="text"
+                            value={answer}
+                            onChange={(e) => setAnswer(e.target.value)}
+                            placeholder="ENTER FINAL PASSPHRASE…"
+                            className="w-full px-4 py-3 rounded-xl bg-[#07080b] border border-emerald-500/35 text-white placeholder-zinc-500 font-mono text-sm tracking-wider focus:outline-none focus:border-emerald-400 transition-all"
                           />
-                        </label>
-                        {photoError && <p className="text-rose-400 text-xs font-mono">{photoError}</p>}
-                        {photoUploaded && (
-                          <p className="text-emerald-400 text-[11px] font-mono flex items-center gap-1">
-                            <CheckIcon className="w-3.5 h-3.5" />
-                            <span>Transmitted to Event Control! Sprint to Start Venue!</span>
-                          </p>
-                        )}
-                      </div>
+                          {answerError && (
+                            <p className="text-rose-400 text-xs font-mono font-semibold px-1">{answerError}</p>
+                          )}
+                          <button
+                            type="submit"
+                            disabled={answerLoading || !answer.trim()}
+                            className="w-full py-3 px-4 rounded-xl bg-emerald-400 hover:bg-emerald-300 disabled:opacity-50 active:scale-[0.98] text-zinc-950 font-black text-xs uppercase tracking-widest shadow-lg shadow-emerald-500/20 transition-all min-h-[46px]"
+                          >
+                            {answerLoading ? 'VERIFYING PASSPHRASE…' : 'SUBMIT PASSPHRASE & FINISH →'}
+                          </button>
+                        </form>
+                      )}
+
+                      {renderVictoryPhotoSection()}
                     </div>
                   ) : !isCompleted && level ? (
                     <form onSubmit={submitAnswer} className="flex flex-col gap-2 pt-1 pb-2">
@@ -1177,7 +1277,7 @@ export default function PlayDashboard() {
       {showClueModal && level && (
         <ClueDropModal
           levelTitle={level.title}
-          orderIndex={level.orderIndex}
+          orderIndex={currentStep}
           clueText={level.clueText}
           locationHint={level.locationHint}
           onClose={() => setShowClueModal(false)}

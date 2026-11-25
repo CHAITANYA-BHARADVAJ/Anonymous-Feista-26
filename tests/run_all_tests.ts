@@ -15,6 +15,7 @@ const SUITES: TestSuite[] = [
   { name: 'Suite 3: Participant Field Gameplay Flow', file: 'tests/03_gameplay_flow.ts' },
   { name: 'Suite 4: Real-Time WebSocket Telemetry & Events', file: 'tests/04_realtime_sockets.ts' },
   { name: 'Suite 5: 25-Squad High-Concurrency Stress Test', file: 'tests/05_concurrency_25_teams.ts' },
+  { name: 'Suite 6: 26-Route Round-Robin & Stride Engine', file: 'tests/06_round_robin_26_routes.ts' },
 ];
 
 async function purgeTestSquads() {

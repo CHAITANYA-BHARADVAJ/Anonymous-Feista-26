@@ -325,32 +325,43 @@ export default function AdminGame() {
     }
   }
 
+  const totalSteps = useMemo(() => {
+    if (levels.length === 0) return 11;
+    const intermediateCount = levels.filter((l) => !l.isFinal).length;
+    const hasFinal = levels.some((l) => l.isFinal);
+    return Math.min(10, intermediateCount) + (hasFinal ? 1 : 0);
+  }, [levels]);
+
   const filteredTeams = useMemo(() => {
     return teams.filter((t) => {
       const matchesSearch = t.name.toLowerCase().includes(search.toLowerCase());
       if (!matchesSearch) return false;
 
       const isFinished = Boolean(t.finishedAt);
-      const currentLevelOrder = t.levelProgress?.[0]?.level?.orderIndex ?? 1;
-      const isFinalLevel = levels.length > 0 && currentLevelOrder >= levels.length;
+      const activeProg = t.levelProgress?.[0];
+      const currentStepNumber = activeProg?.stepNumber ?? 1;
+      const isFinalLevel = Boolean(activeProg?.level?.isFinal) || (totalSteps > 0 && currentStepNumber >= totalSteps);
 
       if (filter === 'active') return !isFinished;
       if (filter === 'finished') return isFinished;
       if (filter === 'final') return !isFinished && isFinalLevel;
       return true;
     });
-  }, [teams, search, filter, levels]);
+  }, [teams, search, filter, totalSteps]);
 
   const stats = useMemo(() => {
     const total = teams.length;
     const finished = teams.filter((t) => t.finishedAt).length;
     const active = total - finished;
-    const atFinale = teams.filter(
-      (t) => !t.finishedAt && levels.length > 0 && (t.levelProgress?.[0]?.level?.orderIndex ?? 1) >= levels.length,
-    ).length;
+    const atFinale = teams.filter((t) => {
+      if (t.finishedAt) return false;
+      const activeProg = t.levelProgress?.[0];
+      const currentStepNumber = activeProg?.stepNumber ?? 1;
+      return Boolean(activeProg?.level?.isFinal) || (totalSteps > 0 && currentStepNumber >= totalSteps);
+    }).length;
 
     return { total, finished, active, atFinale };
-  }, [teams, levels]);
+  }, [teams, totalSteps]);
 
   return (
     <div className="p-4 md:p-6 flex flex-col gap-5 max-w-7xl mx-auto pb-24 font-sans text-zinc-100">
@@ -547,7 +558,7 @@ export default function AdminGame() {
           {[
             'Hunt is underway!',
             '15-Minute Warning: Clue closing soon.',
-            'Target spotted near Amphitheatre.',
+            'Target spotted near Sports Complex bleachers.',
             'Hold position: Timers paused.',
           ].map((preset) => (
             <button
@@ -636,13 +647,13 @@ export default function AdminGame() {
           {/* Clean, De-cluttered Team Rows */}
           <div className="space-y-2 mt-1">
             {filteredTeams.map((team) => {
-              const currentLevelOrder = team.levelProgress?.[0]?.level?.orderIndex ?? 1;
+              const activeProgress = team.levelProgress?.[0];
+              const currentStepNumber = activeProgress?.stepNumber ?? 1;
               const isFinished = Boolean(team.finishedAt);
               const isLoadingThis = actionLoadingTeamId === team.id;
-              const activeProgress = team.levelProgress?.[0];
               const reachedLocation = Boolean(activeProgress?.locationReachedAt);
               const penaltyMinutesTotal = team.penalties?.reduce((acc: number, p: any) => acc + (p.minutes || 0), 0) ?? 0;
-              const isAtFinale = levels.length > 0 && currentLevelOrder >= levels.length;
+              const isAtFinale = Boolean(activeProgress?.level?.isFinal) || (totalSteps > 0 && currentStepNumber >= totalSteps);
               const isMenuOpen = openMenuTeamId === team.id;
 
               return (
@@ -664,7 +675,8 @@ export default function AdminGame() {
                         </span>
                       ) : (
                         <span className="text-[10px] font-mono text-zinc-300 bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800">
-                          Stage {currentLevelOrder}/10
+                          Stage {currentStepNumber}/{totalSteps}
+                          {activeProgress?.level?.title ? ` · ${activeProgress.level.title}` : ''}
                         </span>
                       )}
 
@@ -781,7 +793,7 @@ export default function AdminGame() {
                                   onClick={() => {
                                     setOpenMenuTeamId(null);
                                     setJumpTeam(team);
-                                    setTargetJumpStep(Math.min(10, currentLevelOrder + 1));
+                                    setTargetJumpStep(Math.min(totalSteps, currentStepNumber + 1));
                                   }}
                                   className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-zinc-800 text-zinc-200 flex items-center gap-2 transition-colors"
                                 >
@@ -978,8 +990,8 @@ export default function AdminGame() {
               Stage Override: {jumpTeam.name}
             </h3>
 
-            <div className="grid grid-cols-5 gap-2 font-mono text-xs">
-              {Array.from({ length: 10 }, (_, i) => i + 1).map((step) => {
+            <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 font-mono text-xs">
+              {Array.from({ length: totalSteps }, (_, i) => i + 1).map((step) => {
                 const isSelected = targetJumpStep === step;
                 return (
                   <button
@@ -992,7 +1004,7 @@ export default function AdminGame() {
                         : 'bg-zinc-950 border-zinc-800 text-zinc-300'
                     }`}
                   >
-                    Stage {step}
+                    {step === totalSteps ? `S${step} (End)` : `Stage ${step}`}
                   </button>
                 );
               })}

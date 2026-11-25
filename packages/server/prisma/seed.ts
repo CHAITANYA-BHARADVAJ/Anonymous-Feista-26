@@ -1,15 +1,12 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { FIESTA_2026_PACK } from '../src/data/fiesta2026Pack';
 
 const prisma = new PrismaClient();
 
 async function main() {
   console.log('Seeding database...');
 
-  // Admin team (special team used for admin login — not a playing team)
-  // Admin credentials come from .env; seed creates game + teams only.
-
-  // Create the game
   const game = await prisma.game.upsert({
     where: { id: 1 },
     update: {
@@ -19,7 +16,7 @@ async function main() {
       id: 1,
       name: 'Campus Hunt 2026 - SDMCET',
       status: 'idle',
-      campusMapBounds: JSON.stringify([[15.4350, 75.0260], [15.4420, 75.0340]]),
+      campusMapBounds: JSON.stringify([[15.4230, 75.0080], [15.4345, 75.0210]]),
     },
   });
 
@@ -37,11 +34,16 @@ async function main() {
           type: 'Polygon',
           coordinates: [
             [
-              [75.0265, 15.4360],
-              [75.0335, 15.4360],
-              [75.0335, 15.4415],
-              [75.0265, 15.4415],
-              [75.0265, 15.4360],
+              [75.0122669, 15.4311411],
+              [75.0134151, 15.4294168],
+              [75.0141991, 15.4268949],
+              [75.0143012, 15.4261208],
+              [75.0155108, 15.4261632],
+              [75.0161173, 15.4278694],
+              [75.0169181, 15.4304989],
+              [75.0146484, 15.4314469],
+              [75.0132356, 15.4320346],
+              [75.0122669, 15.4311411],
             ],
           ],
         }),
@@ -69,114 +71,36 @@ async function main() {
     ],
   });
 
-  // Create levels with real SDMCET campus GPS drop coordinates
-  const level1 = await prisma.level.upsert({
-    where: { id: 1 },
-    update: {
-      targetLat: 15.4294,
-      targetLng: 75.0135,
-      triggerRadiusMeters: 25,
-    },
-    create: {
-      id: 1,
-      gameId: game.id,
-      orderIndex: 1,
-      title: 'The Digital Footprint',
-      clueText:
-        'This person loves open-source contributions and has committed to a project about campus life. Their username is a play on the word "anonymous".',
-      locationHint: 'Start near the main library / administration block entrance.',
-      answer: 'anonymous',
-      targetLat: 15.4294,
-      targetLng: 75.0135,
-      triggerRadiusMeters: 25,
-      durationSecs: 1800,
-      isFinal: false,
-      socialLinks: {
-        create: [
-          { platform: 'github', url: 'https://github.com' },
-          { platform: 'instagram', url: 'https://instagram.com' },
-        ],
-      },
-      hints: {
-        create: [
-          { orderIndex: 1, text: 'Check the README files of campus-related repos.', penaltyMins: 2 },
-          { orderIndex: 2, text: 'Their profile picture shows a coffee mug.', penaltyMins: 4 },
-          { orderIndex: 3, text: 'Their username starts with "anon".', penaltyMins: 6 },
-        ],
-      },
-    },
-  });
-
-  const level2 = await prisma.level.upsert({
-    where: { id: 2 },
-    update: {
-      targetLat: 15.4282,
-      targetLng: 75.0152,
-      triggerRadiusMeters: 25,
-    },
-    create: {
-      id: 2,
-      gameId: game.id,
-      orderIndex: 2,
-      title: 'The Social Trail',
-      clueText:
-        'Find someone who posted a photo at the campus canteen last Tuesday. Their Instagram bio mentions their department.',
-      locationHint: 'Head towards the science block / canteen lawn.',
-      answer: 'canteen',
-      targetLat: 15.4282,
-      targetLng: 75.0152,
-      triggerRadiusMeters: 25,
-      durationSecs: 1200,
-      isFinal: false,
-      socialLinks: {
-        create: [{ platform: 'instagram', url: 'https://instagram.com' }],
-      },
-      hints: {
-        create: [
-          { orderIndex: 1, text: 'Look for posts tagged with the college name.', penaltyMins: 2 },
-          { orderIndex: 2, text: 'The department is Computer Science.', penaltyMins: 4 },
-          { orderIndex: 3, text: 'Their last name starts with B.', penaltyMins: 6 },
-        ],
-      },
-      checkpoints: {
-        create: [
-          {
-            kind: 'question',
-            questionText: 'What colour are the canteen chairs?',
-            answer: 'blue',
-            rewardKind: 'bonus_minutes',
-            rewardValue: 2,
+  // Seed official Fiesta 2026 13-Clue Pool + Sports Complex Final Location when empty
+  const existingLevelsCount = await prisma.level.count({ where: { gameId: game.id } });
+  if (existingLevelsCount === 0) {
+    for (const item of FIESTA_2026_PACK) {
+      await prisma.level.create({
+        data: {
+          gameId: game.id,
+          orderIndex: item.orderIndex,
+          title: item.title,
+          clueText: item.clueText,
+          locationHint: item.locationHint,
+          answer: item.answer,
+          targetLat: item.targetLat,
+          targetLng: item.targetLng,
+          triggerRadiusMeters: item.triggerRadiusMeters,
+          isFinal: item.isFinal,
+          socialLinks: { create: item.socialLinks },
+          hints: {
+            create: item.hints.map((h, idx) => ({
+              orderIndex: idx + 1,
+              text: h.text,
+              penaltyMins: h.penaltyMins,
+            })),
           },
-        ],
-      },
-    },
-  });
+        },
+      });
+    }
+  }
 
-  await prisma.level.upsert({
-    where: { id: 3 },
-    update: {
-      targetLat: 15.4272,
-      targetLng: 75.0146,
-      triggerRadiusMeters: 30,
-    },
-    create: {
-      id: 3,
-      gameId: game.id,
-      orderIndex: 3,
-      title: 'Face to Face — The Grand Finale',
-      clueText:
-        'You have unlocked all previous clues! Find the target person near the amphitheatre. Take a photo with them on your phone camera, then sprint to the Start Venue and present your photo to the event coordinators for instant victory verification!',
-      locationHint: 'Amphitheatre grounds — then race to Start Venue!',
-      answer: 'victory',
-      targetLat: 15.4272,
-      targetLng: 75.0146,
-      triggerRadiusMeters: 30,
-      isFinal: true,
-      hints: { create: [] },
-    },
-  });
-
-  // Create teams
+  // Create default demo teams
   const hash1 = await bcrypt.hash('hunt2026', 10);
   const hash2 = await bcrypt.hash('fiesta26', 10);
 
@@ -193,9 +117,9 @@ async function main() {
   });
 
   console.log('Seed complete.');
-  console.log('  Game: Campus Hunt 2026 (id=1)');
+  console.log('  Game: Campus Hunt 2026 - SDMCET (id=1)');
+  console.log('  Levels seeded: 13 intermediate clues + 1 Sports Complex Final Location');
   console.log('  Teams: "Team Alpha" / code: hunt2026 | "Team Beta" / code: fiesta26');
-  console.log('  Admin: use ADMIN_USERNAME/ADMIN_PASSWORD from .env');
 }
 
 main()

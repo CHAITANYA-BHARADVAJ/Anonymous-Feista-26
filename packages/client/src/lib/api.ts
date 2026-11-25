@@ -1,14 +1,18 @@
 const BASE = '/api/v1';
 
-async function request<T>(path: string, init?: RequestInit, retries = 1): Promise<T> {
-  let token: string | undefined;
+function getAuthToken(): string | undefined {
   try {
     const raw = localStorage.getItem('ch-auth');
     if (raw) {
       const parsed = JSON.parse(raw);
-      token = parsed?.state?.token;
+      return parsed?.state?.token;
     }
   } catch {}
+  return undefined;
+}
+
+async function request<T>(path: string, init?: RequestInit, retries = 1): Promise<T> {
+  const token = getAuthToken();
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -133,6 +137,7 @@ export const api = {
       body: JSON.stringify({ message, kind, targetTeamId }),
     }),
   getLevels: (gameId: number) => request<any[]>(`/levels/game/${gameId}`),
+  generateFiestaPack: (gameId: number) => request<any>(`/levels/game/${gameId}/generate-fiesta-pack`, { method: 'POST' }),
   generate26Pack: (gameId: number) => request<any>(`/levels/game/${gameId}/generate-25-pack`, { method: 'POST' }),
   deployPool: (gameId: number, poolClues: any[]) =>
     request<{ ok: boolean; count: number; levels: any[] }>(`/levels/game/${gameId}/deploy-pool`, {
@@ -167,9 +172,11 @@ export const api = {
     }),
   getAdminStats: () => request<any>('/admin/stats'),
   uploadPhoto: async (formData: FormData) => {
+    const token = getAuthToken();
     const res = await fetch('/api/v1/participant/photos', {
       method: 'POST',
       credentials: 'include',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       body: formData,
     });
     if (!res.ok) {

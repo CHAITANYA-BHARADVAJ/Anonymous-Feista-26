@@ -4,7 +4,7 @@ import { MapContainer, TileLayer, Marker, Circle, Polygon, Popup, useMapEvents }
 import { MapResizer } from '../../components/MapResizer';
 import { SDMCET_CENTER, SDMCET_MAX_BOUNDS, SDMCET_CAMPUS_POLYGON, SATELLITE_SOURCES } from '../../lib/mapConfig';
 import { useUiStore } from '../../stores/uiStore';
-import { FlagIcon, IntelIcon, MissionIcon, PinIcon, RocketIcon, ShieldAlertIcon, TrashIcon } from '../../components/Icons';
+import { FlagIcon, IntelIcon, LinkIcon, MissionIcon, PinIcon, RocketIcon, ShieldAlertIcon, TrashIcon } from '../../components/Icons';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -28,6 +28,11 @@ const poolPinIcon = L.divIcon({
   iconAnchor: [12, 12],
 });
 
+export interface SocialLinkItem {
+  platform: string;
+  url: string;
+}
+
 export interface PoolClue {
   id: string;
   title: string;
@@ -40,7 +45,71 @@ export interface PoolClue {
   durationSecs?: number;
   isFinal: boolean;
   hints: Array<{ text: string; penaltyMins: number }>;
-  socialLinks?: Array<{ platform: string; url: string }>;
+  socialLinks?: SocialLinkItem[];
+}
+
+/** Shared external dossier links editor used across Active Stages and Clue Pool Studio. */
+function SocialLinksEditor({
+  links,
+  onChange,
+  focusBorderClass = 'focus:border-zinc-500',
+}: {
+  links: SocialLinkItem[];
+  onChange: (next: SocialLinkItem[]) => void;
+  focusBorderClass?: string;
+}) {
+  return (
+    <div className="bg-zinc-950/80 border border-zinc-800 rounded-xl p-3 flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-zinc-400">External Dossier Links</span>
+        <button
+          type="button"
+          onClick={() => onChange([...links, { platform: 'Instagram', url: '' }])}
+          className="text-[10px] font-mono text-cyan-400 hover:underline"
+        >
+          + Add Link
+        </button>
+      </div>
+      {links.length === 0 ? (
+        <p className="text-[11px] font-mono text-zinc-500">No external links attached to this stage.</p>
+      ) : (
+        links.map((sl, idx) => (
+          <div key={idx} className="flex items-center gap-2">
+            <input
+              type="text"
+              value={sl.platform}
+              onChange={(e) => {
+                const updated = [...links];
+                updated[idx] = { ...updated[idx], platform: e.target.value };
+                onChange(updated);
+              }}
+              placeholder="Platform"
+              className={`w-28 px-2 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-xs text-white font-mono focus:outline-none ${focusBorderClass}`}
+            />
+            <input
+              type="url"
+              value={sl.url}
+              onChange={(e) => {
+                const updated = [...links];
+                updated[idx] = { ...updated[idx], url: e.target.value };
+                onChange(updated);
+              }}
+              placeholder="https://..."
+              className={`flex-1 px-2.5 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-xs text-cyan-300 font-mono focus:outline-none ${focusBorderClass}`}
+            />
+            <button
+              type="button"
+              onClick={() => onChange(links.filter((_, i) => i !== idx))}
+              className="text-zinc-500 hover:text-rose-400 text-xs px-1.5"
+              title="Remove link"
+            >
+              ✕
+            </button>
+          </div>
+        ))
+      )}
+    </div>
+  );
 }
 
 // Helper: Convert center (lat, lng) and radius into 16-point GeoJSON Polygon coordinates
@@ -90,11 +159,15 @@ function MapStudioClickHandler({
 
 // Campus Landmarks Presets for 1-Click Placement
 const SDMCET_PRESETS = [
-  { name: 'Main Library / Admin', lat: 15.4294, lng: 75.0135 },
-  { name: 'Canteen Lawn', lat: 15.4282, lng: 75.0152 },
-  { name: 'Amphitheatre (Finale)', lat: 15.4272, lng: 75.0146 },
-  { name: 'Science Block', lat: 15.4289, lng: 75.0142 },
-  { name: 'Civil / Workshop', lat: 15.4268, lng: 75.0158 },
+  { name: 'Admin / Entry', lat: 15.4303, lng: 75.0129 },
+  { name: 'Bus Parking', lat: 15.4295, lng: 75.0127 },
+  { name: 'Mech Workshop', lat: 15.4268, lng: 75.0158 },
+  { name: 'Library Steps', lat: 15.4294, lng: 75.0135 },
+  { name: 'Library Bridge', lat: 15.4290, lng: 75.0139 },
+  { name: 'Car Parking', lat: 15.4285, lng: 75.0136 },
+  { name: 'Bosh Center', lat: 15.4287, lng: 75.0149 },
+  { name: 'Civil Tree', lat: 15.4275, lng: 75.0160 },
+  { name: 'Sports Complex (Finale)', lat: 15.4305, lng: 75.0165 },
 ];
 
 export default function AdminLevels() {
@@ -350,19 +423,27 @@ export default function AdminLevels() {
       return;
     }
 
-    const idx = poolClues.findIndex((c) => c.id === clue.id);
+    const sanitizedLinks = (clue.socialLinks ?? [])
+      .filter((l) => l.url.trim())
+      .map((l) => ({
+        platform: l.platform.trim() || 'Link',
+        url: l.url.trim(),
+      }));
+    const cleanClue: PoolClue = { ...clue, socialLinks: sanitizedLinks };
+
+    const idx = poolClues.findIndex((c) => c.id === cleanClue.id);
     let updated: PoolClue[];
     if (idx >= 0) {
       updated = [...poolClues];
-      updated[idx] = clue;
+      updated[idx] = cleanClue;
     } else {
-      updated = [...poolClues, clue];
+      updated = [...poolClues, cleanClue];
     }
 
     setPoolClues(updated);
     savePoolClues(updated);
-    if (!selectedPoolIds.includes(clue.id)) {
-      setSelectedPoolIds((prev) => [...prev, clue.id]);
+    if (!selectedPoolIds.includes(cleanClue.id)) {
+      setSelectedPoolIds((prev) => [...prev, cleanClue.id]);
     }
     setEditingPoolClue(null);
     toast('Saved clue to local pool.', 'success');
@@ -424,6 +505,28 @@ export default function AdminLevels() {
     setSelectedPoolIds((prev) =>
       prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id],
     );
+  }
+
+  async function handleLoadFiestaPack() {
+    if (!game) return;
+    const ok = await uiConfirm({
+      title: 'Load Fiesta 2026 (13+1) Clue Pool?',
+      message: 'This replaces active stages with the 13 sequential Fiesta 2026 clues + Sports Complex Final Location (14 total).',
+      confirmLabel: 'Load Fiesta 2026 Pool',
+      tone: 'amber',
+    });
+    if (!ok) return;
+    setIsDeploying(true);
+    try {
+      const res = await api.generateFiestaPack(game.id);
+      setSelectedLevelId(null);
+      await reload();
+      toast(`Loaded ${res.count ?? 14} Fiesta 2026 stages.`, 'success');
+    } catch (err: any) {
+      toast(err.message ?? 'Failed to load Fiesta 2026 pack', 'error');
+    } finally {
+      setIsDeploying(false);
+    }
   }
 
   async function handleDeploySelectedPool() {
@@ -904,16 +1007,27 @@ export default function AdminLevels() {
             <>
               {/* Stages List */}
               <div className="bg-zinc-900/70 border border-zinc-800/80 rounded-2xl p-4 flex flex-col gap-3 shadow-xl">
-                <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
+                <div className="flex items-center justify-between pb-2 border-b border-zinc-800 gap-2">
                   <span className="text-xs font-mono font-bold text-white uppercase tracking-wider">
                     Hunt Stages Sequence ({levels.length})
                   </span>
-                  <button
-                    onClick={handleCreateNewLevel}
-                    className="px-3 py-1.5 bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold rounded-xl transition-all shadow active:scale-95 flex items-center gap-1"
-                  >
-                    + Add Stage
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={handleLoadFiestaPack}
+                      disabled={isDeploying}
+                      className="px-2.5 py-1.5 bg-cyan-950/60 hover:bg-cyan-900/70 border border-cyan-500/40 text-cyan-300 text-xs font-mono font-bold rounded-xl transition-all active:scale-95"
+                      title="Load official Fiesta 2026 13-clue pool + Sports Complex Finale"
+                    >
+                      {isDeploying ? 'Loading…' : 'Fiesta 13+1'}
+                    </button>
+                    <button
+                      onClick={handleCreateNewLevel}
+                      className="px-3 py-1.5 bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold rounded-xl transition-all shadow active:scale-95 flex items-center gap-1"
+                    >
+                      + Add Stage
+                    </button>
+                  </div>
                 </div>
 
                 <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
@@ -992,7 +1106,7 @@ export default function AdminLevels() {
                 >
                   <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
                     <span className="text-xs font-mono font-bold text-white uppercase tracking-wider">
-                      {editForm.id ? `Editing Stage 0${editForm.orderIndex}` : 'New Stage Configuration'}
+                      {editForm.id ? `Editing Stage ${String(editForm.orderIndex).padStart(2, '0')}` : 'New Stage Configuration'}
                     </span>
 
                     {editForm.id && (
@@ -1081,29 +1195,35 @@ export default function AdminLevels() {
                       />
                       <label htmlFor="isFinal" className="text-xs text-zinc-200 font-medium flex items-center gap-1.5">
                         <FlagIcon className="w-3.5 h-3.5 text-purple-300" />
-                        <span>Mark as Grand Finale Objective (Photo Verification)</span>
+                        <span>Mark as Final Location (Sports Complex Rendezvous)</span>
                       </label>
                     </div>
 
-                    {editForm.isFinal ? (
+                    {editForm.isFinal && (
                       <p className="text-[11px] text-purple-300 font-mono bg-purple-950/30 p-2 rounded-lg border border-purple-500/20">
-                        Final stage sprint: Teams submit live camera photo at Amphitheatre grounds for coordinator verification.
+                        Final Location: Teams locate Target Volunteer via hotspot WHO_AM_I_NODE at Sports Complex bleachers and verify passphrase or photo.
                       </p>
-                    ) : (
-                      <div>
-                        <label className="block text-[11px] font-medium text-zinc-400 mb-1">
-                          Secret Passcode / Answer
-                        </label>
-                        <input
-                          type="text"
-                          value={editForm.answer}
-                          onChange={(e) => setEditForm({ ...editForm, answer: e.target.value })}
-                          placeholder="e.g. anonymous"
-                          className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 rounded-xl text-xs font-mono text-cyan-300 focus:outline-none focus:border-zinc-500 uppercase"
-                        />
-                      </div>
                     )}
+
+                    <div>
+                      <label className="block text-[11px] font-medium text-zinc-400 mb-1">
+                        {editForm.isFinal ? 'Final Passphrase (Optional)' : 'Secret Passcode / Answer'}
+                      </label>
+                      <input
+                        type="text"
+                        value={editForm.answer}
+                        onChange={(e) => setEditForm({ ...editForm, answer: e.target.value })}
+                        placeholder={editForm.isFinal ? 'chacha wastegan huyyiyaa!' : 'e.g. trace_sdmcet'}
+                        className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 rounded-xl text-xs font-mono text-cyan-300 focus:outline-none focus:border-zinc-500"
+                      />
+                    </div>
                   </div>
+
+                  {/* External Dossier Links */}
+                  <SocialLinksEditor
+                    links={socialLinksList}
+                    onChange={setSocialLinksList}
+                  />
 
                   {/* Hints */}
                   <div className="bg-zinc-950/80 border border-zinc-800 rounded-xl p-3 flex flex-col gap-2">
@@ -1265,7 +1385,7 @@ export default function AdminLevels() {
                             <div className="flex items-center gap-1 shrink-0">
                               <button
                                 type="button"
-                                onClick={() => setEditingPoolClue(clue)}
+                                onClick={() => setEditingPoolClue({ ...clue, socialLinks: clue.socialLinks ?? [] })}
                                 className="px-2 py-0.5 bg-zinc-800 hover:bg-zinc-700 text-cyan-300 rounded text-[10px] font-mono transition-all"
                               >
                                 Edit
@@ -1297,6 +1417,12 @@ export default function AdminLevels() {
                             {clue.answer && (
                               <span className="bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-800 text-cyan-300 font-bold">
                                 KEY: {clue.answer.toUpperCase()}
+                              </span>
+                            )}
+                            {(clue.socialLinks?.length ?? 0) > 0 && (
+                              <span className="bg-zinc-900 px-1.5 py-0.5 rounded border border-cyan-500/30 text-cyan-300 flex items-center gap-1">
+                                <LinkIcon className="w-3 h-3" />
+                                <span>{clue.socialLinks!.length} link{clue.socialLinks!.length > 1 ? 's' : ''}</span>
                               </span>
                             )}
                             <span className="text-zinc-500 flex items-center gap-1">
@@ -1406,21 +1532,28 @@ export default function AdminLevels() {
                         </label>
                       </div>
 
-                      {!editingPoolClue.isFinal && (
-                        <div>
-                          <label className="block text-[11px] font-medium text-zinc-400 mb-1">
-                            Secret Passcode / Answer
-                          </label>
-                          <input
-                            type="text"
-                            value={editingPoolClue.answer}
-                            onChange={(e) => setEditingPoolClue({ ...editingPoolClue, answer: e.target.value })}
-                            placeholder="e.g. quantum"
-                            className="w-full px-3 py-2 bg-zinc-900 border border-zinc-800 rounded-xl text-xs font-mono text-cyan-300 uppercase focus:outline-none focus:border-amber-400"
-                          />
-                        </div>
-                      )}
+                      <div>
+                        <label className="block text-[11px] font-medium text-zinc-400 mb-1">
+                          {editingPoolClue.isFinal ? 'Final Passphrase (Optional)' : 'Secret Passcode / Answer'}
+                        </label>
+                        <input
+                          type="text"
+                          value={editingPoolClue.answer}
+                          onChange={(e) => setEditingPoolClue({ ...editingPoolClue, answer: e.target.value })}
+                          placeholder={editingPoolClue.isFinal ? 'chacha wastegan huyyiyaa!' : 'e.g. quantum'}
+                          className={`w-full px-3 py-2 bg-zinc-900 border border-zinc-800 rounded-xl text-xs font-mono text-cyan-300 focus:outline-none focus:border-amber-400 ${
+                            editingPoolClue.isFinal ? '' : 'uppercase'
+                          }`}
+                        />
+                      </div>
                     </div>
+
+                    {/* External Dossier Links */}
+                    <SocialLinksEditor
+                      links={editingPoolClue.socialLinks ?? []}
+                      onChange={(next) => setEditingPoolClue({ ...editingPoolClue, socialLinks: next })}
+                      focusBorderClass="focus:border-amber-400"
+                    />
 
                     {/* Hints */}
                     <div className="bg-zinc-950/80 border border-zinc-800 rounded-xl p-3 flex flex-col gap-2">

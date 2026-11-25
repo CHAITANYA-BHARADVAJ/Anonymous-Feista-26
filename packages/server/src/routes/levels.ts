@@ -1,15 +1,118 @@
 import { Router } from 'express';
 import { prisma } from '../lib/prisma';
 import { requireAuth } from '../middleware/auth';
-import { io } from '../index';
+import { FIESTA_2026_PACK } from '../data/fiesta2026Pack';
 
 const router = Router();
+
+interface LevelSeedInput {
+  orderIndex?: number;
+  title: string;
+  clueText?: string;
+  locationHint?: string;
+  answer?: string;
+  targetLat?: number | string | null;
+  targetLng?: number | string | null;
+  triggerRadiusMeters?: number | string | null;
+  durationSecs?: number | string | null;
+  isFinal?: boolean;
+  hints?: Array<{ text: string; penaltyMins?: number }>;
+  socialLinks?: Array<{ platform?: string; url: string }>;
+}
+
+/** Atomically replace all levels, hints, links, and active run progress for a game. */
+async function replaceGameLevels(gameId: number, items: LevelSeedInput[]) {
+  await prisma.$transaction(async (tx) => {
+    await tx.teamPath.deleteMany({});
+    await tx.hintReveal.deleteMany({});
+    await tx.teamLevelProgress.deleteMany({});
+    await tx.teamCheckpoint.deleteMany({});
+    await tx.hint.deleteMany({});
+    await tx.checkpoint.deleteMany({});
+    await tx.socialLink.deleteMany({});
+    await tx.level.deleteMany({ where: { gameId } });
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const isFinal = Boolean(
+        item.isFinal || (i === items.length - 1 && item.title?.toLowerCase().includes('finale')),
+      );
+      const created = await tx.level.create({
+        data: {
+          gameId,
+          orderIndex: item.orderIndex ?? i + 1,
+          title: item.title,
+          clueText: item.clueText || '',
+          locationHint: item.locationHint || '',
+          answer: item.answer || '',
+          isFinal,
+          targetLat: item.targetLat != null && item.targetLat !== '' ? Number(item.targetLat) : null,
+          targetLng: item.targetLng != null && item.targetLng !== '' ? Number(item.targetLng) : null,
+          triggerRadiusMeters:
+            item.triggerRadiusMeters != null && item.triggerRadiusMeters !== ''
+              ? Number(item.triggerRadiusMeters)
+              : 25,
+          durationSecs:
+            item.durationSecs != null && item.durationSecs !== '' ? Number(item.durationSecs) : null,
+        },
+      });
+
+      if (Array.isArray(item.hints)) {
+        for (let hIdx = 0; hIdx < item.hints.length; hIdx++) {
+          const h = item.hints[hIdx];
+          if (h && h.text && h.text.trim()) {
+            await tx.hint.create({
+              data: {
+                levelId: created.id,
+                orderIndex: hIdx + 1,
+                text: h.text.trim(),
+                penaltyMins: Number(h.penaltyMins ?? (hIdx + 1) * 2),
+              },
+            });
+          }
+        }
+      }
+
+      if (Array.isArray(item.socialLinks)) {
+        for (const sl of item.socialLinks) {
+          if (sl && sl.url && sl.url.trim()) {
+            await tx.socialLink.create({
+              data: {
+                levelId: created.id,
+                platform: sl.platform || 'Dossier',
+                url: sl.url.trim(),
+              },
+            });
+          }
+        }
+      }
+    }
+  });
+
+  return prisma.level.findMany({
+    where: { gameId },
+    orderBy: { orderIndex: 'asc' },
+    include: { hints: { orderBy: { orderIndex: 'asc' } }, socialLinks: true },
+  });
+}
+
+// Generate Fiesta 2026 Official 13-Clue Round-Robin Pool + Sports Complex Final Location (14 Stages)
+router.post('/game/:gameId/generate-fiesta-pack', requireAuth('admin'), async (req, res) => {
+  const gameId = Number(req.params.gameId);
+  try {
+    const generated = await replaceGameLevels(gameId, FIESTA_2026_PACK);
+    res.json({ ok: true, count: generated.length, levels: generated });
+  } catch (err: any) {
+    console.error('Failed to generate Fiesta 2026 pack:', err);
+    res.status(500).json({ error: err.message ?? 'Failed to generate Fiesta 2026 pack' });
+  }
+});
 
 // Generate complete 25 Intermediate Clues + 1 Grand Finale Pack (26 Clues Total)
 router.post('/game/:gameId/generate-25-pack', requireAuth('admin'), async (req, res) => {
   const gameId = Number(req.params.gameId);
   try {
-    const SDMCET_26_PACK = [
+    const SDMCET_26_PACK: LevelSeedInput[] = [
       { orderIndex: 1, title: 'Main Library Plaque', clueText: 'Decipher the brass foundation inscription at the main library threshold.', locationHint: 'Near Main Library Entrance', answer: 'library', targetLat: 15.4294, targetLng: 75.0135, triggerRadiusMeters: 25, isFinal: false, hints: [{ text: 'Look on the right cornerstone of the stairs', penaltyMins: 2 }, { text: 'Check under the brass bell emblem', penaltyMins: 4 }] },
       { orderIndex: 2, title: 'Central Canteen Gazebo', clueText: 'Inspect the cyber notice stickers under the central wooden pavilion.', locationHint: 'Canteen Lawn Pavilion', answer: 'fiesta', targetLat: 15.4282, targetLng: 75.0152, triggerRadiusMeters: 25, isFinal: false, hints: [{ text: 'Examine the pillar facing the lawn', penaltyMins: 2 }] },
       { orderIndex: 3, title: 'Admin Portico Pillar', clueText: 'Find the carved seal on the west pillar of the Administrative Portico.', locationHint: 'Administrative Block Frontage', answer: 'sdmcet', targetLat: 15.4298, targetLng: 75.0138, triggerRadiusMeters: 25, isFinal: false, hints: [{ text: 'Walk behind the main stone pillars', penaltyMins: 2 }] },
@@ -35,47 +138,10 @@ router.post('/game/:gameId/generate-25-pack', requireAuth('admin'), async (req, 
       { orderIndex: 23, title: 'Main South Gate', clueText: 'Find the surveillance sector number stamped on the south gate sentry post.', locationHint: 'Campus Main South Gate', answer: 'sentinel', targetLat: 15.4258, targetLng: 75.0142, triggerRadiusMeters: 25, isFinal: false, hints: [{ text: 'Security cabin window frame', penaltyMins: 2 }] },
       { orderIndex: 24, title: 'North Security Post', clueText: 'Locate the campus map signboard serial number near the north highway turn.', locationHint: 'Campus North Arch', answer: 'checkpoint', targetLat: 15.4320, targetLng: 75.0130, triggerRadiusMeters: 25, isFinal: false, hints: [{ text: 'Under the glass noticeboard frame', penaltyMins: 2 }] },
       { orderIndex: 25, title: 'Solar Grid Walkway', clueText: 'Record the photovoltaic array inverter rating on the solar display box.', locationHint: 'Staff Quarters Solar Walkway', answer: 'watt', targetLat: 15.4265, targetLng: 75.0165, triggerRadiusMeters: 25, isFinal: false, hints: [{ text: 'Digital meter box mounted on pillar', penaltyMins: 2 }] },
-      { orderIndex: 26, title: 'Grand Finale Rendezvous', clueText: 'GRAND FINALE OBJECTIVE: Intercept target operative standing at the Central Amphitheatre! Capture live photo proof together and sprint to Start Venue!', locationHint: 'SDMCET Central Amphitheatre Arena', answer: '', isFinal: true, targetLat: 15.4272, targetLng: 75.0146, triggerRadiusMeters: 30, hints: [{ text: 'Target operative is holding an Anonymous Club banner at the stage center', penaltyMins: 2 }] }
+      { orderIndex: 26, title: 'Grand Finale Rendezvous', clueText: 'GRAND FINALE OBJECTIVE: Intercept target operative at the Sports Complex Bleachers! Capture live photo proof or submit passphrase!', locationHint: 'SDMCET Sports Complex Bleachers', answer: 'chacha wastegan huyyiyaa!', isFinal: true, targetLat: 15.4305, targetLng: 75.0165, triggerRadiusMeters: 35, hints: [{ text: 'Target operative is holding a red clipboard on the bleachers', penaltyMins: 2 }] },
     ];
 
-    // Wipe prior levels safely
-    await prisma.$transaction(async (tx) => {
-      await tx.teamPath.deleteMany({});
-      await tx.hintReveal.deleteMany({});
-      await tx.teamLevelProgress.deleteMany({});
-      await tx.teamCheckpoint.deleteMany({});
-      await tx.hint.deleteMany({});
-      await tx.checkpoint.deleteMany({});
-      await tx.socialLink.deleteMany({});
-      await tx.level.deleteMany({ where: { gameId } });
-
-      for (const item of SDMCET_26_PACK) {
-        const { hints, ...levelData } = item;
-        const created = await tx.level.create({
-          data: { ...levelData, gameId },
-        });
-
-        if (hints && hints.length > 0) {
-          for (let i = 0; i < hints.length; i++) {
-            await tx.hint.create({
-              data: {
-                levelId: created.id,
-                orderIndex: i + 1,
-                text: hints[i].text,
-                penaltyMins: hints[i].penaltyMins,
-              },
-            });
-          }
-        }
-      }
-    });
-
-    const generated = await prisma.level.findMany({
-      where: { gameId },
-      orderBy: { orderIndex: 'asc' },
-      include: { hints: true },
-    });
-
+    const generated = await replaceGameLevels(gameId, SDMCET_26_PACK);
     res.json({ ok: true, count: generated.length, levels: generated });
   } catch (err: any) {
     console.error('Failed to generate 26-pack:', err);
@@ -86,7 +152,7 @@ router.post('/game/:gameId/generate-25-pack', requireAuth('admin'), async (req, 
 // Deploy selected clues from Clue Pool Studio directly into active game
 router.post('/game/:gameId/deploy-pool', requireAuth('admin'), async (req, res) => {
   const gameId = Number(req.params.gameId);
-  const { poolClues } = req.body as { poolClues: any[] };
+  const { poolClues } = req.body as { poolClues: LevelSeedInput[] };
 
   if (!Array.isArray(poolClues) || poolClues.length === 0) {
     res.status(400).json({ error: 'Please select at least 1 clue from the pool to deploy.' });
@@ -94,76 +160,7 @@ router.post('/game/:gameId/deploy-pool', requireAuth('admin'), async (req, res) 
   }
 
   try {
-    await prisma.$transaction(async (tx) => {
-      // Clear previous progress, relations, and paths for this game
-      await tx.teamPath.deleteMany({});
-      await tx.hintReveal.deleteMany({});
-      await tx.teamLevelProgress.deleteMany({});
-      await tx.teamCheckpoint.deleteMany({});
-      await tx.hint.deleteMany({});
-      await tx.checkpoint.deleteMany({});
-      await tx.socialLink.deleteMany({});
-      await tx.level.deleteMany({ where: { gameId } });
-
-      for (let i = 0; i < poolClues.length; i++) {
-        const item = poolClues[i];
-        const isFinal = Boolean(item.isFinal || (i === poolClues.length - 1 && item.title?.toLowerCase().includes('finale')));
-        const created = await tx.level.create({
-          data: {
-            gameId,
-            orderIndex: i + 1,
-            title: item.title,
-            clueText: item.clueText || '',
-            locationHint: item.locationHint || '',
-            answer: item.answer || '',
-            isFinal,
-            targetLat: item.targetLat != null && item.targetLat !== '' ? Number(item.targetLat) : null,
-            targetLng: item.targetLng != null && item.targetLng !== '' ? Number(item.targetLng) : null,
-            triggerRadiusMeters: item.triggerRadiusMeters != null && item.triggerRadiusMeters !== '' ? Number(item.triggerRadiusMeters) : 25,
-            durationSecs: item.durationSecs != null && item.durationSecs !== '' ? Number(item.durationSecs) : null,
-          },
-        });
-
-        // Hints
-        if (Array.isArray(item.hints)) {
-          for (let hIdx = 0; hIdx < item.hints.length; hIdx++) {
-            const h = item.hints[hIdx];
-            if (h && h.text && h.text.trim()) {
-              await tx.hint.create({
-                data: {
-                  levelId: created.id,
-                  orderIndex: hIdx + 1,
-                  text: h.text.trim(),
-                  penaltyMins: Number(h.penaltyMins ?? (hIdx + 1) * 2),
-                },
-              });
-            }
-          }
-        }
-
-        // Social Links
-        if (Array.isArray(item.socialLinks)) {
-          for (const sl of item.socialLinks) {
-            if (sl && sl.url && sl.url.trim()) {
-              await tx.socialLink.create({
-                data: {
-                  levelId: created.id,
-                  platform: sl.platform || 'Dossier',
-                  url: sl.url.trim(),
-                },
-              });
-            }
-          }
-        }
-      }
-    });
-
-    const deployed = await prisma.level.findMany({
-      where: { gameId },
-      orderBy: { orderIndex: 'asc' },
-      include: { hints: true, socialLinks: true },
-    });
-
+    const deployed = await replaceGameLevels(gameId, poolClues);
     res.json({ ok: true, count: deployed.length, levels: deployed });
   } catch (err: any) {
     console.error('Failed to deploy pool clues:', err);
@@ -241,13 +238,12 @@ router.put('/:id', requireAuth('admin'), async (req, res) => {
   if ('orderIndex' in data) data.orderIndex = Number(data.orderIndex);
   if ('durationSecs' in data) data.durationSecs = data.durationSecs ? Number(data.durationSecs) : null;
 
-  const level = await prisma.level.update({
+  await prisma.level.update({
     where: { id },
     data,
   });
 
   if (Array.isArray(hints)) {
-    // Delete existing hint reveals and hints
     const existingHints = await prisma.hint.findMany({ where: { levelId: id }, select: { id: true } });
     const hintIds = existingHints.map((h) => h.id);
     if (hintIds.length > 0) {
@@ -317,23 +313,19 @@ router.delete('/:id', requireAuth('admin'), async (req, res) => {
       return;
     }
 
-    // Cascade delete all dependent records in transaction
     await prisma.$transaction(async (tx) => {
-      // 1. Delete Hint reveals for hints belonging to this level
       const hints = await tx.hint.findMany({ where: { levelId: id }, select: { id: true } });
       const hintIds = hints.map((h) => h.id);
       if (hintIds.length > 0) {
         await tx.hintReveal.deleteMany({ where: { hintId: { in: hintIds } } });
       }
 
-      // 2. Delete Checkpoint claims for checkpoints belonging to this level
       const checkpoints = await tx.checkpoint.findMany({ where: { levelId: id }, select: { id: true } });
       const cpIds = checkpoints.map((c) => c.id);
       if (cpIds.length > 0) {
         await tx.teamCheckpoint.deleteMany({ where: { checkpointId: { in: cpIds } } });
       }
 
-      // 3. Delete Team Level Progress and Team Paths (and any reveals attached)
       await tx.teamPath.deleteMany({ where: { levelId: id } });
       const progress = await tx.teamLevelProgress.findMany({ where: { levelId: id }, select: { id: true } });
       const progIds = progress.map((p) => p.id);
@@ -342,15 +334,11 @@ router.delete('/:id', requireAuth('admin'), async (req, res) => {
         await tx.teamLevelProgress.deleteMany({ where: { levelId: id } });
       }
 
-      // 4. Delete Hints, Checkpoints, and Social Links
       await tx.hint.deleteMany({ where: { levelId: id } });
       await tx.checkpoint.deleteMany({ where: { levelId: id } });
       await tx.socialLink.deleteMany({ where: { levelId: id } });
-
-      // 5. Delete the Level itself
       await tx.level.delete({ where: { id } });
 
-      // 6. Automatically re-index remaining levels so orderIndex is contiguous (1, 2, 3...)
       const remainingLevels = await tx.level.findMany({
         where: { gameId: level.gameId },
         orderBy: { orderIndex: 'asc' },

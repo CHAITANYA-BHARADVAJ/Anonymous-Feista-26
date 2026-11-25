@@ -264,12 +264,12 @@ export function announceGameEnded() {
 export function announceClueDecrypted(stageNumber: number, isFinal?: boolean) {
   if (isFinal) {
     speakPaMessage(
-      'You reached the final location. Next step: find our volunteer here, take a group photo together using the camera button, and run back to the start desk.',
+      'You reached the final location at Sports Complex. Scan Wi-Fi for the hotspot, find our volunteer holding the red clipboard on the bleachers, and deliver the final passphrase.',
       { priority: 'high', chime: 'pa', tone: 'finale' },
     );
   } else {
     speakPaMessage(
-      `Stage ${stageNumber} unlocked. Next step: read the clue on your screen, find the answer nearby, and enter it below to get your next location.`,
+      `Stage ${stageNumber} unlocked. Next step: read the clue on your screen, solve the puzzle here, and enter the answer below to get your next location.`,
       { priority: 'normal', chime: 'pa', tone: 'success' },
     );
   }
@@ -278,7 +278,7 @@ export function announceClueDecrypted(stageNumber: number, isFinal?: boolean) {
 export function announceStageAdvance(nextStageNumber: number | null, isFinal?: boolean) {
   if (isFinal) {
     speakPaMessage(
-      'Great job. You are now on the final stage. Follow the radar arrow to the final spot, take a group photo there, and bring it to the start desk.',
+      'Great job. You solved all ten clues and unlocked the final location. Head to the Sports Complex, scan for the Wi-Fi hotspot to locate our volunteer with the red clipboard, and deliver the final passphrase.',
       { priority: 'high', chime: 'pa', tone: 'finale' },
     );
   } else if (nextStageNumber) {
@@ -318,5 +318,20 @@ export function announceVerifiedFinish(teamName?: string | null) {
   speakPaMessage(
     `Well done, ${squad}. Your finish is confirmed. Please wait near the main stage for the final results.`,
     { priority: 'high', chime: 'pa', tone: 'success' },
+  );
+}
+
+export function announcePhotoRejected(reason?: string | null) {
+  const detail = reason?.trim() ? ` Reason: ${reason.trim()}.` : '';
+  speakPaMessage(
+    `Attention, Players. Your finale photo was rejected.${detail} Please take a clearer live photo and upload it again.`,
+    { priority: 'high', chime: 'alert', tone: 'alert' },
+  );
+}
+
+export function announcePhotoApproved() {
+  speakPaMessage(
+    'Your finale photo has been approved by Event Control.',
+    { priority: 'normal', chime: 'pa', tone: 'success' },
   );
 }

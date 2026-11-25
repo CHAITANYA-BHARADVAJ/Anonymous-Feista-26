@@ -11,7 +11,7 @@ const router = Router();
 router.get('/teams', requireAuth('admin'), async (_req, res) => {
   const teams = await prisma.team.findMany({
     include: {
-      levelProgress: { include: { level: true }, orderBy: { level: { orderIndex: 'desc' } } },
+      levelProgress: { include: { level: true }, orderBy: { stepNumber: 'desc' } },
       penalties: true,
       locations: { orderBy: { recordedAt: 'desc' }, take: 1 },
     },
@@ -56,13 +56,8 @@ router.post('/teams', requireAuth('admin'), async (req, res) => {
   // If a game is currently running, unlock step 1 immediately for this newly registered team
   const game = await prisma.game.findFirst({ orderBy: { id: 'desc' } });
   if (game && game.status === 'running') {
-    const { generateTeamPath } = await import('../services/dispatchService');
-    const paths = await generateTeamPath(team.id, game.id);
-    if (paths.length > 0) {
-      await prisma.teamLevelProgress.create({
-        data: { teamId: team.id, levelId: paths[0].levelId, stepNumber: 1, unlockedAt: new Date() },
-      });
-    }
+    const { dispatchNextConflictFreeClue } = await import('../services/dispatchService');
+    await dispatchNextConflictFreeClue(io, team.id, game.id).catch(() => {});
   }
 
   const rankings = await buildLeaderboard();
@@ -186,13 +181,8 @@ router.post('/teams/:id/reset', requireAuth('admin'), async (req, res) => {
 
   const game = await prisma.game.findFirst({ orderBy: { id: 'desc' } });
   if (game && (game.status === 'running' || game.status === 'paused')) {
-    const { generateTeamPath } = await import('../services/dispatchService');
-    const paths = await generateTeamPath(team.id, game.id);
-    if (paths.length > 0) {
-      await prisma.teamLevelProgress.create({
-        data: { teamId: team.id, levelId: paths[0].levelId, stepNumber: 1, unlockedAt: new Date() },
-      });
-    }
+    const { dispatchNextConflictFreeClue } = await import('../services/dispatchService');
+    await dispatchNextConflictFreeClue(io, team.id, game.id).catch(() => {});
   }
 
   const rankings = await buildLeaderboard();
@@ -429,21 +419,26 @@ router.post('/teams/:id/force-complete', requireAuth('admin'), async (req, res) 
   res.json({ ok: true, completedLevel: activeProgress?.level, nextLevelId: dispatch.nextLevel?.id ?? null, finished: dispatch.finished });
 });
 
-// Admin emergency override: Jump team directly to any target stage (1 to 10)
+// Admin emergency override: Jump team directly to any target stage (1 to totalSteps)
 router.post('/teams/:id/jump-stage', requireAuth('admin'), async (req, res) => {
   const teamId = Number(req.params.id);
   const { targetStepNumber } = req.body as { targetStepNumber: number };
-
-  if (!targetStepNumber || targetStepNumber < 1 || targetStepNumber > 10) {
-    res.status(400).json({ error: 'targetStepNumber must be between 1 and 10' });
-    return;
-  }
 
   const team = await prisma.team.findUnique({ where: { id: teamId } });
   if (!team) { res.status(404).json({ error: 'Team not found' }); return; }
 
   const game = await prisma.game.findFirst({ orderBy: { id: 'desc' } });
   if (!game) { res.status(404).json({ error: 'No game' }); return; }
+
+  const { generateTeamPath, getTotalStepsForTeam, DEFAULT_INTERMEDIATE_STEPS, getCampusOccupancyMatrix } = await import('../services/dispatchService');
+  await generateTeamPath(teamId, game.id, undefined, DEFAULT_INTERMEDIATE_STEPS);
+  const totalSteps = await getTotalStepsForTeam(teamId, game.id);
+  const maxStep = Math.max(1, totalSteps);
+
+  if (!targetStepNumber || targetStepNumber < 1 || targetStepNumber > maxStep) {
+    res.status(400).json({ error: `targetStepNumber must be between 1 and ${maxStep}` });
+    return;
+  }
 
   // Mark all previous active progress as completed
   await prisma.teamLevelProgress.updateMany({
@@ -457,24 +452,15 @@ router.post('/teams/:id/jump-stage', requireAuth('admin'), async (req, res) => {
   });
 
   let targetLevel: any = null;
+  const finaleLevel = await prisma.level.findFirst({ where: { gameId: game.id, isFinal: true } });
 
-  if (targetStepNumber === 10) {
-    // Grand Finale
-    targetLevel = await prisma.level.findFirst({ where: { gameId: game.id, isFinal: true } });
+  if (finaleLevel && targetStepNumber === totalSteps) {
+    targetLevel = finaleLevel;
   } else {
-    // Check TeamPath for this step
-    let path = await prisma.teamPath.findUnique({
+    const path = await prisma.teamPath.findUnique({
       where: { teamId_stepNumber: { teamId, stepNumber: targetStepNumber } },
       include: { level: true },
     });
-    if (!path) {
-      const { generateTeamPath } = await import('../services/dispatchService');
-      await generateTeamPath(teamId, game.id, undefined, 9);
-      path = await prisma.teamPath.findUnique({
-        where: { teamId_stepNumber: { teamId, stepNumber: targetStepNumber } },
-        include: { level: true },
-      });
-    }
     targetLevel = path?.level ?? null;
   }
 
@@ -496,13 +482,12 @@ router.post('/teams/:id/jump-stage', requireAuth('admin'), async (req, res) => {
   io.to(`team:${teamId}`).emit('level:unlocked', {
     levelId: targetLevel.id,
     stepNumber: targetStepNumber,
-    totalSteps: 10,
+    totalSteps,
     title: targetLevel.title,
     isFinal: targetLevel.isFinal,
     unlockedAt: newProgress.unlockedAt,
   });
 
-  const { getCampusOccupancyMatrix } = await import('../services/dispatchService');
   io.to('admin').emit('admin:occupancy_update', await getCampusOccupancyMatrix(game.id));
 
   const rankings = await buildLeaderboard();
@@ -512,6 +497,7 @@ router.post('/teams/:id/jump-stage', requireAuth('admin'), async (req, res) => {
   res.json({
     ok: true,
     stepNumber: targetStepNumber,
+    totalSteps,
     level: targetLevel,
   });
 });
@@ -609,9 +595,12 @@ router.patch('/photos/:id', requireAuth('admin'), async (req, res) => {
   });
 
   io.to(`team:${photo.teamId}`).emit('photo:reviewed', {
+    id: updated.id,
     photoId,
-    status,
-    reviewNote,
+    status: updated.status,
+    reviewNote: updated.reviewNote,
+    submittedAt: updated.submittedAt,
+    reviewedAt: updated.reviewedAt,
   });
 
   res.json(updated);

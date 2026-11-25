@@ -1,9 +1,9 @@
 # 🎯 PROJECT_STATE — Campus Hunt SDMCET (Anonymous-Feista-26)
 
 > **Auto-Maintained Operational Master File**  
-> **Last Updated:** November 25, 2026, 00:58 IST  
-> **Active Branch:** `main` & `feat/initial-implementation` (synced)  
-> **Latest Code Commit:** [`8f0584f`](https://github.com/CHAITANYA-BHARADVAJ/Anonymous-Feista-26/commit/8f0584f) (Full Obsidian UI/UX polish, dead-file cleanup & male PA voice module)  
+> **Last Updated:** November 26, 2026, 00:50 IST  
+> **Active Branch:** `main` & `feat/initial-implementation`  
+> **Latest Checkpoint:** Fiesta 2026 26-Route Round-Robin Engine, Clue Pool External Links & Live Photo Rejection Sync  
 > **Live Production URL:** [https://13.126.101.127.nip.io/](https://13.126.101.127.nip.io/)  
 > **Public IP:** `13.126.101.127`  
 > **Repository:** [https://github.com/CHAITANYA-BHARADVAJ/Anonymous-Feista-26](https://github.com/CHAITANYA-BHARADVAJ/Anonymous-Feista-26)  
@@ -18,10 +18,10 @@
 ### Gameplay Flow
 1. **Enrolment & Authentication:** Teams self-register at `/register` or login at `/login` with call-signs (e.g. `Team Alpha` / `hunt2026` or `alpha26`).
 2. **Pre-Kickoff Standby HUD:** Teams enter a tactical waiting room with real-time GPS sensor diagnostics.
-3. **Synchronized Real-Time Kickoff:** When coordinators click **"START GAME"**, the server generates randomized 9-step paths from 10–15 campus landmarks. Every squad's phone instantly chirps, vibrates, and reveals their unique Stage 01 mission directive without refreshing.
-4. **OSINT Clues & Satellite Radar:** Teams solve cryptographic and riddle directives, guided by real-time GPS distance radar pointing to target landmarks across SDMCET grounds.
+3. **Synchronized Real-Time Kickoff:** When coordinators click **"START GAME"**, the server assigns each team a unique 10-clue sequence from the 13 sequential Fiesta 2026 clues via deterministic Round-Robin + alternating `+1` / `+5` prime strides (supporting up to 26 unique routes with at most 2 squads per landmark per step). Every squad's phone chirps, vibrates, and unlocks Stage 01 automatically.
+4. **OSINT Clues & Satellite Radar:** Teams solve cryptographic and riddle directives (plus optional external dossier links & QR codes), guided by real-time GPS distance radar pointing to target landmarks across SDMCET grounds.
 5. **Restricted Geofencing:** Entering unauthorized college zones (e.g., electrical sub-stations) triggers instant audio/haptic warnings and adds automatic time penalties.
-6. **Grand Finale Sprint (Stage 10):** All paths converge on the Central Amphitheatre for physical photo capture and admin verification. Lowest adjusted time wins.
+6. **Grand Finale Sprint (Stage 11):** After solving 10 clues, all paths converge on the **Sports Complex Bleachers** (`WHO_AM_I_NODE` hotspot + target volunteer passphrase & optional victory photo proof with live approval/rejection status). Lowest adjusted time wins.
 
 ---
 
@@ -207,16 +207,17 @@ Executed via `tests/run_all_tests.ts` with pre-flight and post-flight database s
 | **Suite 3** | `tests/03_gameplay_flow.ts` | End-to-end participant field gameplay progression |
 | **Suite 4** | `tests/04_realtime_sockets.ts` | Real-time Socket.io telemetry, kickoff & alert events |
 | **Suite 5** | `tests/05_concurrency_25_teams.ts` | 25-squad concurrent registration & gameplay stress test |
-
-**Saved Local DB Snapshot (`packages/server/prisma/dev.db` — WAL checkpointed cleanly, 0-byte WAL):**
-- **Game:** `Campus Hunt 2026 - SDMCET` (ID `1`, status `idle`)
-- **Teams (4):** `Team Alpha`, `Team Beta`, `Cyber Phantoms`, `Titan` (0 leftover test squads)
-- **Configured Data:** `16` levels, `4` geofence zones
+| **Suite 6** | `tests/06_round_robin_26_routes.ts` | 26-route Round-Robin + (`+1`/`+5`) prime-stride & coprime verification |
 
 ---
 
 ## 📜 9. Chronological Update & Changelog History
 
+* **Nov 26, 2026:** Fiesta 2026 26-Route Round-Robin Engine, Clue Pool External Links & Live Photo Rejection Reflection:
+  1. **Round-Robin + Alternating Prime-Stride Dispatch Engine (`+1`/`+5`):** Upgraded [`dispatchService.ts`](packages/server/src/services/dispatchService.ts) so squads receive sequential starting landmarks modulo pool size with alternating `+1` (teams 1–13) and `+5` (teams 14–26) coprime strides, solving 10 clues across 26 unique non-overlapping paths before unlocking the Final Location (`stepNumber` / `totalSteps = 11`).
+  2. **Fiesta 2026 13+1 Pack & Sports Complex Finale:** Added [`fiesta2026Pack.ts`](packages/server/src/data/fiesta2026Pack.ts) (13 sequential clues + Stage 14 Sports Complex Rendezvous), wired [`seed.ts`](packages/server/prisma/seed.ts) and `POST /api/v1/levels/game/:gameId/generate-fiesta-pack` in [`levels.ts`](packages/server/src/routes/levels.ts), added punctuation/whitespace-normalized final passphrase verification (`chacha wastegan huyyiyaa!`), and dynamic `totalSteps` HUD/Admin progress tracking.
+  3. **Clue Pool Studio External Dossier Links & Passphrase Editor:** Extracted shared `SocialLinksEditor` component in [`AdminLevels.tsx`](packages/client/src/routes/admin/AdminLevels.tsx) so Clue Pool clues support adding/editing/removing external links, show link-count badges, and allow editing the Final Passphrase even on Finale clues.
+  4. **Participant Photo Rejection Reflection (Real-Time + Reload Persistent):** Returned `latestPhoto` in `GET /api/v1/participant/game` ([`participant.ts`](packages/server/src/routes/participant.ts)), enriched `photo:reviewed` WebSocket payloads in [`admin.ts`](packages/server/src/routes/admin.ts), synced [`gameStore.ts`](packages/client/src/stores/gameStore.ts), [`App.tsx`](packages/client/src/App.tsx), [`useSocket.ts`](packages/client/src/hooks/useSocket.ts), [`voice.ts`](packages/client/src/lib/voice.ts), and [`PlayDashboard.tsx`](packages/client/src/routes/play/PlayDashboard.tsx) so rejected photos auto-expand the mission sheet with the coordinator's `reviewNote`, trigger chimes/PA voice alerts, and stay visible with a one-tap retake flow across reloads (with Bearer token header forwarding in [`api.ts`](packages/client/src/lib/api.ts)).
 * **Nov 25, 2026 (Commit `8f0584f`):** Full Obsidian UI/UX overhaul, dead-file cleanup, and male PA voice announcements:
   1. **Squid Game Male PA Voice Module:** Added [`voice.ts`](packages/client/src/lib/voice.ts), [`voiceStore.ts`](packages/client/src/stores/voiceStore.ts), [`PaVoiceBanner.tsx`](packages/client/src/components/PaVoiceBanner.tsx), and synthesized chimes/fanfare (`playPaChime`, `playKickoffFanfare`) in [`sound.ts`](packages/client/src/lib/sound.ts). Delivers a calm arena welcome & field-safety briefing upon login (`announceArenaWelcome`), an energetic fanfare with step-by-step plain-language instructions upon game kickoff (`announceGameStarted`), gesture speech priming (`primeSpeechEngine`) with an interactive autoplay banner fallback, and HUD mute/replay controls.
   2. **Unified Obsidian UI & Feedback System:** Consolidated CSS surface tokens (`.obsidian-surface`), `100dvh` mobile-safe layout containers, reduced-motion media rules (`prefers-reduced-motion`), and custom inline SVG icons (`Icons.tsx`). Added [`uiStore.ts`](packages/client/src/stores/uiStore.ts) and [`FeedbackOverlay.tsx`](packages/client/src/components/FeedbackOverlay.tsx) to replace blocking native browser dialogs (`alert()`/`confirm()`/`prompt()`) across participant, auth, spectator, and admin portals.

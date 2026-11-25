@@ -3,6 +3,7 @@ import { create } from 'zustand';
 export interface LevelProgress {
   id: number;
   levelId: number;
+  stepNumber?: number;
   unlockedAt: string;
   locationReachedAt: string | null;
   completedAt: string | null;
@@ -49,14 +50,26 @@ export interface Ranking {
   finished: boolean;
 }
 
+export interface LatestPhoto {
+  id: number;
+  status: 'pending' | 'approved' | 'rejected' | string;
+  reviewNote?: string | null;
+  submittedAt?: string;
+  reviewedAt?: string | null;
+}
+
 interface GameStoreState {
   game: GameState | null;
   progress: LevelProgress[];
+  totalSteps: number;
+  latestPhoto: LatestPhoto | null;
   rankings: Ranking[];
   announcements: { kind: string; message: string; sentAt: string }[];
   connected: boolean;
   setGame: (g: GameState) => void;
   setProgress: (p: LevelProgress[]) => void;
+  setTotalSteps: (total: number) => void;
+  setLatestPhoto: (p: LatestPhoto | null) => void;
   setRankings: (r: Ranking[]) => void;
   addAnnouncement: (a: { kind: string; message: string; sentAt: string }) => void;
   setConnected: (v: boolean) => void;
@@ -66,11 +79,15 @@ interface GameStoreState {
 export const useGameStore = create<GameStoreState>((set, get) => ({
   game: null,
   progress: [],
+  totalSteps: 11,
+  latestPhoto: null,
   rankings: [],
   announcements: [],
   connected: false,
   setGame: (game) => set({ game }),
   setProgress: (progress) => set({ progress }),
+  setTotalSteps: (totalSteps) => set({ totalSteps }),
+  setLatestPhoto: (latestPhoto) => set({ latestPhoto }),
   setRankings: (rankings) => set({ rankings }),
   addAnnouncement: (a) =>
     set((s) => ({ announcements: [a, ...s.announcements].slice(0, 10) })),

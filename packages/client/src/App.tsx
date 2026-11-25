@@ -39,13 +39,15 @@ function RequireAuth({ role, children }: { role: 'team' | 'admin'; children: JSX
 function AppInner() {
   useSocket();
   const role = useAuthStore((s) => s.role);
-  const { setGame, setProgress, setRankings } = useGameStore();
+  const { setGame, setProgress, setTotalSteps, setLatestPhoto, setRankings } = useGameStore();
 
   useEffect(() => {
     if (role === 'team') {
       api.getParticipantGame().then((d) => {
         setGame(d.game);
         setProgress(d.progress);
+        if (typeof d.totalSteps === 'number' && d.totalSteps > 0) setTotalSteps(d.totalSteps);
+        setLatestPhoto(d.latestPhoto ?? null);
       }).catch(() => {});
     } else if (role === 'admin') {
       api.getLeaderboard().then((d) => setRankings(d.rankings)).catch(() => {});

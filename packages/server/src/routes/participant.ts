@@ -5,7 +5,7 @@ import { photoUpload } from '../middleware/upload';
 import { io } from '../index';
 import { scheduleTeamLevelTimer } from '../services/timerService';
 import { buildLeaderboard, invalidateLeaderboardCache } from '../services/scoreService';
-import { dispatchNextConflictFreeClue } from '../services/dispatchService';
+import { dispatchNextConflictFreeClue, getTotalStepsForTeam } from '../services/dispatchService';
 
 const router = Router();
 
@@ -46,22 +46,38 @@ router.get('/game', requireAuth('team'), async (req: AuthRequest, res) => {
   });
   if (!game) { res.status(404).json({ error: 'No game found' }); return; }
 
-  const progress = await prisma.teamLevelProgress.findMany({
-    where: { teamId },
-    include: {
-      level: {
-        include: {
-          socialLinks: true,
-          hints: { orderBy: { orderIndex: 'asc' } },
-          checkpoints: true,
+  const [progress, totalSteps, latestPhoto] = await Promise.all([
+    prisma.teamLevelProgress.findMany({
+      where: { teamId },
+      include: {
+        level: {
+          include: {
+            socialLinks: true,
+            hints: { orderBy: { orderIndex: 'asc' } },
+            checkpoints: true,
+          },
         },
+        hintReveals: true,
       },
-      hintReveals: true,
-    },
-    orderBy: { level: { orderIndex: 'asc' } },
-  });
+      orderBy: { stepNumber: 'asc' },
+    }),
+    getTotalStepsForTeam(teamId, game.id),
+    game.startedAt
+      ? prisma.photo.findFirst({
+          where: { teamId, submittedAt: { gte: game.startedAt } },
+          orderBy: { submittedAt: 'desc' },
+          select: {
+            id: true,
+            status: true,
+            reviewNote: true,
+            submittedAt: true,
+            reviewedAt: true,
+          },
+        })
+      : Promise.resolve(null),
+  ]);
 
-  res.json({ game, progress });
+  res.json({ game, progress, totalSteps, latestPhoto });
 });
 
 // Check GPS location and trigger clue drop
@@ -140,7 +156,11 @@ router.post('/levels/:id/answer', requireAuth('team'), async (req: AuthRequest, 
 
   // If level requires answer verification
   if (level.answer && level.answer.trim()) {
-    const correct = answer?.trim().toLowerCase() === level.answer.trim().toLowerCase();
+    const normalize = (s: string) => {
+      const base = s.trim().toLowerCase().replace(/\s+/g, ' ');
+      return level.isFinal ? base.replace(/[!?.]+$/, '') : base;
+    };
+    const correct = normalize(answer ?? '') === normalize(level.answer);
     if (!correct) { res.status(422).json({ error: 'Incorrect answer', correct: false }); return; }
   }
 
@@ -151,7 +171,7 @@ router.post('/levels/:id/answer', requireAuth('team'), async (req: AuthRequest, 
     data: { completedAt: new Date(), completedBy: 'answer' },
   });
 
-  // Dynamically assign next conflict-free clue (or Grand Finale at step 10)
+  // Dynamically assign next stride-routed clue (or Final Location after 10 clues)
   const dispatch = await dispatchNextConflictFreeClue(io, teamId, level.gameId);
 
   // Update leaderboard
@@ -163,6 +183,8 @@ router.post('/levels/:id/answer', requireAuth('team'), async (req: AuthRequest, 
     correct: true,
     nextLevelId: dispatch.nextLevel?.id ?? null,
     stepNumber: dispatch.stepNumber,
+    totalSteps: dispatch.totalSteps,
+    isFinal: Boolean(dispatch.nextLevel?.isFinal),
     finished: dispatch.finished,
   });
 });

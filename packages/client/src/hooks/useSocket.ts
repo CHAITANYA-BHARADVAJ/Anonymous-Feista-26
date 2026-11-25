@@ -2,20 +2,23 @@ import { useEffect, useRef } from 'react';
 import { getSocket } from '../lib/socket';
 import { useAuthStore } from '../stores/authStore';
 import { useGameStore } from '../stores/gameStore';
+import { useUiStore } from '../stores/uiStore';
 import { api } from '../lib/api';
-import { playClueUnlockedSound, triggerHaptic } from '../lib/sound';
+import { playClueUnlockedSound, playErrorSound, playSuccessSound, triggerHaptic } from '../lib/sound';
 import {
   announceGameEnded,
   announceGamePaused,
   announceGameResumed,
   announceGameStarted,
+  announcePhotoApproved,
+  announcePhotoRejected,
   announceVerifiedFinish,
 } from '../lib/voice';
 
 export function useSocket() {
   const token = useAuthStore((s) => s.token);
   const role = useAuthStore((s) => s.role);
-  const { setGame, setProgress, setRankings, addAnnouncement, setConnected } = useGameStore();
+  const { setGame, setProgress, setTotalSteps, setLatestPhoto, setRankings, addAnnouncement, setConnected } = useGameStore();
   const syncingRef = useRef(false);
 
   useEffect(() => {
@@ -30,6 +33,10 @@ export function useSocket() {
         const data = await api.getParticipantGame();
         setGame(data.game);
         setProgress(data.progress);
+        if (typeof data.totalSteps === 'number' && data.totalSteps > 0) {
+          setTotalSteps(data.totalSteps);
+        }
+        setLatestPhoto(data.latestPhoto ?? null);
         if (shouldAlert) {
           playClueUnlockedSound();
           triggerHaptic();
@@ -92,7 +99,10 @@ export function useSocket() {
     });
 
     // Real-time clue dispatch & unlocks (admin advance, kickoff, answer completed)
-    socket.on('level:unlocked', async () => {
+    socket.on('level:unlocked', async (payload: any) => {
+      if (typeof payload?.totalSteps === 'number' && payload.totalSteps > 0) {
+        setTotalSteps(payload.totalSteps);
+      }
       await syncParticipantData(true);
     });
 
@@ -115,6 +125,33 @@ export function useSocket() {
 
     socket.on('team:penalty_applied', async () => {
       await syncParticipantData(false);
+    });
+
+    socket.on('photo:reviewed', (payload: any) => {
+      if (!payload) return;
+      setLatestPhoto({
+        id: payload.id ?? payload.photoId,
+        status: payload.status,
+        reviewNote: payload.reviewNote ?? null,
+        submittedAt: payload.submittedAt,
+        reviewedAt: payload.reviewedAt,
+      });
+
+      if (payload.status === 'rejected') {
+        playErrorSound();
+        triggerHaptic([250, 100, 250]);
+        const reason = payload.reviewNote?.trim();
+        useUiStore.getState().toast(
+          reason ? `Photo rejected: ${reason}` : 'Victory photo rejected. Please take a clearer photo and resubmit.',
+          'error',
+        );
+        announcePhotoRejected(reason);
+      } else if (payload.status === 'approved') {
+        playSuccessSound();
+        triggerHaptic();
+        useUiStore.getState().toast('Victory photo approved by Event Control!', 'success');
+        announcePhotoApproved();
+      }
     });
 
     socket.on('leaderboard:updated', ({ rankings }: { rankings: any[] }) => {
@@ -144,6 +181,7 @@ export function useSocket() {
       socket.off('level:auto_unlocked');
       socket.off('team:verified_finish');
       socket.off('team:penalty_applied');
+      socket.off('photo:reviewed');
       socket.off('leaderboard:updated');
     };
   }, [token, role]);

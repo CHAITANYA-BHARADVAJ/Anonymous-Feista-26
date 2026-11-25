@@ -8,6 +8,7 @@ export default function AdminTeams() {
   const uiConfirm = useUiStore((s) => s.confirm);
   const [teams, setTeams] = useState<any[]>([]);
   const [game, setGame] = useState<any>(null);
+  const [totalSteps, setTotalSteps] = useState<number>(11);
   const [regStatus, setRegStatus] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
@@ -84,9 +85,18 @@ export default function AdminTeams() {
         api.getGames(),
         api.getRegistrationStatus().catch(() => null),
       ]);
+      const activeGame = games[0] ?? null;
       setTeams(data);
-      setGame(games[0] ?? null);
+      setGame(activeGame);
       setRegStatus(reg);
+      if (activeGame) {
+        const lvls = await api.getLevels(activeGame.id).catch(() => []);
+        if (lvls.length > 0) {
+          const inter = lvls.filter((l: any) => !l.isFinal).length;
+          const hasFin = lvls.some((l: any) => l.isFinal);
+          setTotalSteps(Math.min(10, inter) + (hasFin ? 1 : 0));
+        }
+      }
     } catch (err: any) {
       console.error('Failed to load teams:', err);
     } finally {
@@ -386,7 +396,7 @@ export default function AdminTeams() {
                     </span>
                   ) : (
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 font-bold shrink-0">
-                      {currentProgress ? `Step ${currentProgress.stepNumber ?? 1} / 10` : 'Standby'}
+                      {currentProgress ? `Step ${currentProgress.stepNumber ?? 1} / ${totalSteps}` : 'Standby'}
                     </span>
                   )}
                 </div>
