@@ -117,6 +117,7 @@ export default function PlayDashboard() {
   const rankings = useGameStore((s) => s.rankings);
   const setProgress = useGameStore((s) => s.setProgress);
   const setTotalSteps = useGameStore((s) => s.setTotalSteps);
+  const setRankings = useGameStore((s) => s.setRankings);
   const latestPhoto = useGameStore((s) => s.latestPhoto);
   const setLatestPhoto = useGameStore((s) => s.setLatestPhoto);
   const connected = useGameStore((s) => s.connected);
@@ -179,12 +180,14 @@ export default function PlayDashboard() {
 
   // Auto-expand sheet and reset input whenever active level progresses
   const prevLevelIdRef = useRef<number | null>(null);
+  const lastAutoCheckInRef = useRef<number>(0);
   useEffect(() => {
     if (currentLevel?.levelId && currentLevel.levelId !== prevLevelIdRef.current) {
       prevLevelIdRef.current = currentLevel.levelId;
       setIsSheetExpanded(true);
       setAnswer('');
       setAnswerError('');
+      setPhotoError('');
     }
   }, [currentLevel?.levelId]);
 
@@ -268,6 +271,7 @@ export default function PlayDashboard() {
       return;
     }
     setCheckInLoading(true);
+    lastAutoCheckInRef.current = Date.now();
     try {
       await api.reachLocation(level.id, pos.latitude, pos.longitude);
       if (useVoiceStore.getState().muted) {
@@ -288,19 +292,21 @@ export default function PlayDashboard() {
     }
   }
 
-  // Auto trigger when player steps inside geofence radius
+  // Auto trigger when player steps inside geofence radius while hunt is running
   useEffect(() => {
     if (
+      game?.status === 'running' &&
       !locationReached &&
       !isVerifiedFinished &&
       distanceMeters !== null &&
       distanceMeters <= triggerRadius + 5 &&
       pos &&
-      !checkInLoading
+      !checkInLoading &&
+      Date.now() - lastAutoCheckInRef.current > 8000
     ) {
       triggerCheckIn();
     }
-  }, [distanceMeters, locationReached, isVerifiedFinished, triggerRadius, pos]);
+  }, [game?.status, distanceMeters, locationReached, isVerifiedFinished, triggerRadius, pos, checkInLoading]);
 
   // Submit Answer Solution
   async function submitAnswer(e: React.FormEvent) {
@@ -338,6 +344,7 @@ export default function PlayDashboard() {
         if (typeof data.totalSteps === 'number' && data.totalSteps > 0) setTotalSteps(data.totalSteps);
         if (res.finished) {
           triggerHaptic([200, 100, 200, 100, 500]);
+          api.getLeaderboard().then((lb) => setRankings(lb.rankings ?? [])).catch(() => {});
         }
       }
     } catch (err: any) {
@@ -359,7 +366,7 @@ export default function PlayDashboard() {
       );
       return;
     }
-    const freeHint = currentLevel.hintsUsed < (currentLevel.hintReveals.length - revealedHintIds.size + 1);
+    const freeHint = (currentLevel.freeHintsRemaining ?? 0) > 0;
     const penalty = freeHint ? 0 : hint.penaltyMins;
     const confirmed = await uiConfirm({
       title: `Reveal Tactical Intel #${hint.orderIndex}?`,
@@ -1029,8 +1036,8 @@ export default function PlayDashboard() {
 
                       <div className="flex flex-col gap-2">
                         {level.hints.map((hint) => {
-                          const revealed = revealedHintIds.has(hint.id) || revealedHints[hint.id];
-                          const text = revealedHints[hint.id];
+                          const text = revealedHints[hint.id] ?? hint.text;
+                          const revealed = Boolean(hint.revealed || revealedHintIds.has(hint.id) || text);
 
                           return (
                             <div key={hint.id} className="bg-[#07080b] rounded-xl p-3 border border-white/[0.07]">
@@ -1076,7 +1083,7 @@ export default function PlayDashboard() {
                         </p>
                       </div>
 
-                      {!isCompleted && Boolean(level.answer?.trim()) && (
+                      {!isCompleted && Boolean(level.requiresAnswer ?? level.answer?.trim()) && (
                         <form onSubmit={submitAnswer} className="flex flex-col gap-2 pt-1 text-left">
                           <input
                             type="text"

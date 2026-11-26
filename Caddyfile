@@ -11,10 +11,32 @@
     }
 }
 
-# Dynamic domain from environment (e.g. 13.233.50.120.nip.io or hunt.yourdomain.com)
+# Dynamic domain from environment (e.g. 13.126.101.127.nip.io or hunt.yourdomain.com)
 {$DOMAIN:localhost} {
     # High-performance compression for map tiles, vectors, and JS bundles
     encode gzip zstd
+
+    # Guard upload size cleanly at proxy edge (matches 10MB photo cap with multipart overhead)
+    request_body {
+        max_size 15MB
+    }
+
+    # Security headers (allow self geolocation & camera for GPS radar & victory photo)
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "geolocation=(self), camera=(self)"
+        -Server
+    }
+
+    # Never cache service worker or HTML shell across deployments
+    @nocache {
+        path / /index.html /sw.js /registerSW.js /manifest.webmanifest
+    }
+    header @nocache {
+        Cache-Control "no-store, must-revalidate"
+    }
 
     # Aggressive browser caching for Vite hashed production assets
     @static {

@@ -100,20 +100,40 @@ async function main() {
     }
   }
 
+  // Seed shared Clue Pool library when empty so all coordinator devices start with the Fiesta 2026 bank
+  const existingPoolCount = await prisma.cluePoolItem.count();
+  if (existingPoolCount === 0) {
+    await prisma.cluePoolItem.createMany({
+      data: FIESTA_2026_PACK.map((item) => ({
+        title: item.title,
+        clueText: item.clueText,
+        locationHint: item.locationHint,
+        answer: item.answer,
+        targetLat: item.targetLat,
+        targetLng: item.targetLng,
+        triggerRadiusMeters: item.triggerRadiusMeters,
+        durationSecs: item.durationSecs ?? null,
+        isFinal: item.isFinal,
+        hintsJson: JSON.stringify(item.hints ?? []),
+        socialLinksJson: JSON.stringify(item.socialLinks ?? []),
+      })),
+    });
+  }
+
   // Create default demo teams
   const hash1 = await bcrypt.hash('hunt2026', 10);
   const hash2 = await bcrypt.hash('fiesta26', 10);
 
   await prisma.team.upsert({
     where: { name: 'Team Alpha' },
-    update: {},
-    create: { name: 'Team Alpha', code: hash1 },
+    update: { displayCode: 'hunt2026' },
+    create: { name: 'Team Alpha', code: hash1, displayCode: 'hunt2026' },
   });
 
   await prisma.team.upsert({
     where: { name: 'Team Beta' },
-    update: {},
-    create: { name: 'Team Beta', code: hash2 },
+    update: { displayCode: 'fiesta26' },
+    create: { name: 'Team Beta', code: hash2, displayCode: 'fiesta26' },
   });
 
   console.log('Seed complete.');

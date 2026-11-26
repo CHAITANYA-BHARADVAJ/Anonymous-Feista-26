@@ -11,13 +11,11 @@ function parseCookie(cookieHeader: string | undefined, key: string): string | un
 
 export function registerSocketHandlers(io: Server) {
   io.use(async (socket, next) => {
-    // Try auth token from handshake auth first, then fall back to cookie
     let token = socket.handshake.auth?.token as string | undefined;
     if (!token) {
       token = parseCookie(socket.handshake.headers.cookie, 'ch_token') || parseCookie(socket.handshake.headers.cookie, 'token');
     }
     if (!token) {
-      // Allow spectator connections without auth
       socket.data.role = 'spectator';
       return next();
     }
@@ -36,31 +34,41 @@ export function registerSocketHandlers(io: Server) {
   });
 
   io.on('connection', async (socket: Socket) => {
-    const role = socket.data.role as string;
-    const user = socket.data.user;
+    try {
+      const role = socket.data.role as string;
+      const user = socket.data.user;
 
-    // Join appropriate rooms
-    const game = await prisma.game.findFirst({ orderBy: { id: 'desc' } });
-    if (game) socket.join(`game:${game.id}`);
+      const game = await prisma.game.findFirst({ orderBy: { id: 'desc' } });
+      if (game) socket.join(`game:${game.id}`);
 
-    if (role === 'team' && user) {
-      socket.join(`team:${user.sub}`);
-    } else if (role === 'admin') {
-      socket.join('admin');
-    } else {
-      socket.join('spectator');
+      if (role === 'team' && user) {
+        socket.join(`team:${user.sub}`);
+      } else if (role === 'admin') {
+        socket.join('admin');
+      } else {
+        socket.join('spectator');
+      }
+
+      socket.on('location:update', async (payload: { lat?: unknown; lng?: unknown } | undefined) => {
+        try {
+          if (role !== 'team' || !user || !payload) return;
+          const lat = Number(payload.lat);
+          const lng = Number(payload.lng);
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+          const g = await prisma.game.findFirst({ orderBy: { id: 'desc' } });
+          if (!g || g.status !== 'running') return;
+          await handleLocationUpdate(io, user.sub, lat, lng);
+        } catch (err) {
+          console.warn('Socket location:update error:', err);
+        }
+      });
+
+      socket.on('join:spectator', () => {
+        socket.join('spectator');
+      });
+    } catch (err) {
+      console.warn('Socket connection initialization error:', err);
     }
-
-    // Location updates from participants
-    socket.on('location:update', async ({ lat, lng }: { lat: number; lng: number }) => {
-      if (role !== 'team' || !user) return;
-      const g = await prisma.game.findFirst({ orderBy: { id: 'desc' } });
-      if (!g || g.status !== 'running') return;
-      await handleLocationUpdate(io, user.sub, lat, lng);
-    });
-
-    socket.on('join:spectator', () => {
-      socket.join('spectator');
-    });
   });
 }

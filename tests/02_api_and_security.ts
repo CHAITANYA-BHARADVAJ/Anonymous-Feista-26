@@ -1,4 +1,6 @@
 import http from 'http';
+import assert from 'assert';
+import { getProductionEnvErrors } from '../packages/server/src/lib/env';
 
 const BASE_URL = 'http://localhost:3001/api/v1';
 
@@ -69,15 +71,15 @@ async function runApiAndSecurityTests() {
   const testSquadName = `Test Squad ${Date.now()}`;
   const testSquadCode = 'testpass123';
 
-  // 1. Health check
+  // 1. Health check (including DB probe)
   try {
-    process.stdout.write('1. Testing /health endpoint... ');
+    process.stdout.write('1. Testing /health endpoint & DB probe... ');
     const res = await request('/health');
-    if (res.status === 200 && res.data?.ok === true) {
-      console.log('✅ PASSED (200 OK)');
+    if (res.status === 200 && res.data?.ok === true && res.data?.db === 'ok') {
+      console.log('✅ PASSED (200 OK, DB OK)');
       passed++;
     } else {
-      throw new Error(`Expected 200 {ok: true}, got ${res.status}: ${JSON.stringify(res.data)}`);
+      throw new Error(`Expected 200 {ok: true, db: 'ok'}, got ${res.status}: ${JSON.stringify(res.data)}`);
     }
   } catch (err: any) {
     console.log('❌ FAILED\n', err.message);
@@ -330,10 +332,156 @@ async function runApiAndSecurityTests() {
     failed++;
   }
 
-  // 14. Clean up test squad (ensures zero residual test records)
+  // 14. Security: Protected /uploads route (401 unauthenticated, 403 cross-team)
+  try {
+    process.stdout.write('14. Verifying /uploads blocks unauthenticated & cross-team access... ');
+    const unauthStatus = await new Promise<number>((resolve, reject) => {
+      http.get('http://localhost:3001/uploads/1/nonexistent.png', (res) => {
+        res.resume();
+        resolve(res.statusCode || 500);
+      }).on('error', reject);
+    });
+    const crossTeamStatus = await new Promise<number>((resolve, reject) => {
+      http.get(
+        `http://localhost:3001/uploads/${testSquadId + 999}/nonexistent.png`,
+        { headers: { Authorization: `Bearer ${teamToken}` } },
+        (res) => {
+          res.resume();
+          resolve(res.statusCode || 500);
+        },
+      ).on('error', reject);
+    });
+    assert.strictEqual(unauthStatus, 401, `Expected 401 on unauth /uploads, got ${unauthStatus}`);
+    assert.strictEqual(crossTeamStatus, 403, `Expected 403 on cross-team /uploads, got ${crossTeamStatus}`);
+    console.log('✅ PASSED (401 unauth, 403 cross-team)');
+    passed++;
+  } catch (err: any) {
+    console.log('❌ FAILED\n', err.message);
+    failed++;
+  }
+
+  // 15. Input Validation & No-Crash Check (Invalid IDs return 400, server stays healthy)
+  try {
+    process.stdout.write('15. Invalid numeric route IDs return 400 safely... ');
+    const badLevel = await request('/levels/not-an-id', {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${adminToken}` },
+      body: { title: 'Test' },
+    });
+    const badTeam = await request('/admin/teams/invalid-id', {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    const badAction = await request(`/games/${activeGameId}/status`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${adminToken}` },
+      body: { action: 'nuke_db' },
+    });
+    assert.strictEqual(badLevel.status, 400);
+    assert.strictEqual(badTeam.status, 400);
+    assert.strictEqual(badAction.status, 400);
+    console.log('✅ PASSED (All invalid params returned 400 cleanly)');
+    passed++;
+  } catch (err: any) {
+    console.log('❌ FAILED\n', err.message);
+    failed++;
+  }
+
+  // 16. Shared Clue Pool DB CRUD (/levels/pool)
+  try {
+    process.stdout.write('16. Shared Clue Pool DB CRUD (/levels/pool)... ');
+    const created = await request('/levels/pool', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken}` },
+      body: {
+        title: `PoolTest_${Date.now()}`,
+        clueText: 'Solve the pool test',
+        locationHint: 'Main quad',
+        answer: 'poolkey',
+        hints: [{ text: 'Pool hint 1', penaltyMins: 2 }],
+        socialLinks: [{ platform: 'GitHub', url: 'https://github.com/anon-sdmcet' }],
+      },
+    });
+    assert.strictEqual(created.status, 201);
+    const poolId = created.data?.id;
+    assert.ok(typeof poolId === 'number' && poolId > 0);
+
+    const list = await request('/levels/pool', {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    assert.strictEqual(list.status, 200);
+    assert.ok(list.data.some((c: any) => c.id === poolId));
+
+    const updated = await request(`/levels/pool/${poolId}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${adminToken}` },
+      body: { title: 'PoolTestUpdated', answer: 'poolkey2' },
+    });
+    assert.strictEqual(updated.status, 200);
+    assert.strictEqual(updated.data?.title, 'PoolTestUpdated');
+
+    const deleted = await request(`/levels/pool/${poolId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    assert.strictEqual(deleted.status, 200);
+    console.log('✅ PASSED (Created, Listed, Updated, Deleted)');
+    passed++;
+  } catch (err: any) {
+    console.log('❌ FAILED\n', err.message);
+    failed++;
+  }
+
+  // 17. Auth Brute-Force Rate Limiting (429 on repeated failed team login)
+  try {
+    process.stdout.write('17. Auth Brute-Force Rate Limiter (429 after burst)... ');
+    const dummyName = `RateLimitDummy_${Date.now()}`;
+    let got429 = false;
+    for (let i = 0; i < 24; i++) {
+      const r = await request('/auth/team/login', {
+        method: 'POST',
+        body: { name: dummyName, code: 'wrongcode' },
+      });
+      if (r.status === 429) {
+        got429 = true;
+        break;
+      }
+    }
+    assert.ok(got429, 'Expected 429 Too Many Requests after 20+ failed attempts');
+    console.log('✅ PASSED (429 enforced)');
+    passed++;
+  } catch (err: any) {
+    console.log('❌ FAILED\n', err.message);
+    failed++;
+  }
+
+  // 18. Production Environment Secret Validator
+  try {
+    process.stdout.write('18. Production Env Validator rejects defaults & accepts strong secrets... ');
+    const badErrors = getProductionEnvErrors({
+      NODE_ENV: 'production',
+      JWT_SECRET: 'dev-secret',
+      ADMIN_PASSWORD: 'admin123',
+    });
+    assert.strictEqual(badErrors.length, 2);
+
+    const goodErrors = getProductionEnvErrors({
+      NODE_ENV: 'production',
+      JWT_SECRET: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
+      ADMIN_PASSWORD: 'Sdmcet#Event2026!',
+    });
+    assert.strictEqual(goodErrors.length, 0);
+    console.log('✅ PASSED');
+    passed++;
+  } catch (err: any) {
+    console.log('❌ FAILED\n', err.message);
+    failed++;
+  }
+
+  // 19. Clean up test squad (ensures zero residual test records)
   if (testSquadId) {
     try {
-      process.stdout.write('14. Cleaning up Temporary Test Squad... ');
+      process.stdout.write('19. Cleaning up Temporary Test Squad... ');
       const delSquadRes = await request(`/admin/teams/${testSquadId}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${adminToken}` },

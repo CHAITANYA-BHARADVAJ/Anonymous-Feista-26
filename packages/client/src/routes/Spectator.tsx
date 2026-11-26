@@ -1,12 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { getSocket } from '../lib/socket';
 import { formatMs, useStopwatch } from '../hooks/useCountdown';
+import { Ranking } from '../stores/gameStore';
 import { toggleFullscreen, enableAutoFullscreenOnFirstGesture } from '../lib/fullscreen';
 import { CheckIcon, ClockIcon, MaximizeIcon, RadarIcon, TrophyIcon } from '../components/Icons';
+import SquadBreakdownModal, { formatDurationSecs } from '../components/SquadBreakdownModal';
 
 export default function Spectator() {
   const [state, setState] = useState<any>(null);
+  const [selectedTeamId, setSelectedTeamId] = useState<number | null>(null);
 
   const { formatted: elapsedFormatted } = useStopwatch(
     state?.game?.startedAt,
@@ -17,25 +20,42 @@ export default function Spectator() {
 
   useEffect(() => {
     const cleanupFs = enableAutoFullscreenOnFirstGesture();
-    api.getSpectatorState().then(setState);
+    const fetchState = () => api.getSpectatorState().then(setState).catch(() => {});
+    fetchState();
+
     const socket = getSocket();
     socket.emit('join:spectator');
+    socket.on('connect', () => {
+      socket.emit('join:spectator');
+      fetchState();
+    });
     socket.on('leaderboard:updated', ({ rankings }: any) =>
       setState((s: any) => (s ? { ...s, rankings } : s)),
     );
-    socket.on('game:status_changed', (data: any) =>
-      setState((s: any) => (s ? { ...s, game: { ...s.game, ...data } } : s)),
-    );
+    const handleStatus = (data: any) =>
+      setState((s: any) => (s ? { ...s, game: { ...s.game, ...(data.game || data) } } : s));
+    socket.on('game:status_changed', handleStatus);
+    socket.on('game:status', handleStatus);
+    socket.on('game:started', handleStatus);
     socket.on('game:announcement', (a: any) =>
       setState((s: any) => (s ? { ...s, announcements: [a, ...(s.announcements ?? [])].slice(0, 5) } : s)),
     );
     return () => {
       cleanupFs();
+      socket.off('connect');
       socket.off('leaderboard:updated');
-      socket.off('game:status_changed');
+      socket.off('game:status_changed', handleStatus);
+      socket.off('game:status', handleStatus);
+      socket.off('game:started', handleStatus);
       socket.off('game:announcement');
     };
   }, []);
+
+  const rankings: Ranking[] = state?.rankings ?? [];
+  const selectedRanking = useMemo(
+    () => (selectedTeamId != null ? rankings.find((r) => r.teamId === selectedTeamId) ?? null : null),
+    [rankings, selectedTeamId],
+  );
 
   if (!state) {
     return (
@@ -65,9 +85,11 @@ export default function Spectator() {
   const statusKey = state.game?.status ?? 'idle';
   const statusStyle = statusStyles[statusKey] ?? statusStyles.idle;
   const dotStyle = dotStyles[statusKey] ?? dotStyles.idle;
+  const finishedCount = rankings.filter((r) => r.finished).length;
+  const racingCount = rankings.filter((r) => !r.finished && r.currentLevel > 0).length;
 
   return (
-    <div className="min-h-[100dvh] bg-[#07080b] text-gray-100 p-6 md:p-8 lg:p-12 flex flex-col gap-7 max-w-6xl mx-auto select-none">
+    <div className="min-h-[100dvh] bg-[#07080b] text-gray-100 p-6 md:p-8 lg:p-10 flex flex-col gap-6 max-w-6xl mx-auto select-none">
       {/* Big Screen Header */}
       <header className="flex flex-col items-center justify-center text-center gap-2 relative pt-8 sm:pt-0">
         <button
@@ -102,6 +124,9 @@ export default function Spectator() {
               <span>{elapsedFormatted}</span>
             </span>
           )}
+          <span className="px-4 py-1.5 rounded-full text-xs font-mono font-bold obsidian-surface text-zinc-300 tabular-nums">
+            {finishedCount} Finished • {racingCount} Racing • {rankings.length} Total
+          </span>
         </div>
       </header>
 
@@ -119,28 +144,37 @@ export default function Spectator() {
 
       {/* Main High-Impact Leaderboard Table */}
       <div className="obsidian-surface rounded-[28px] overflow-hidden">
+        <div className="px-6 py-3 border-b border-white/[0.06] bg-white/[0.01] flex items-center justify-between text-[11px] font-mono text-zinc-400">
+          <span>LIVE LEADERBOARD STANDINGS</span>
+          <span className="text-cyan-400">Click any squad for detailed stage splits &amp; time audit</span>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b border-white/[0.08] bg-white/[0.02] text-[11px] font-mono text-zinc-400 uppercase tracking-widest">
                 <th className="py-4 px-5 sm:px-6">Rank</th>
                 <th className="py-4 px-5 sm:px-6">Team Identity</th>
-                <th className="py-4 px-5 sm:px-6 text-center">Progress</th>
-                <th className="py-4 px-5 sm:px-6 text-right">Adjusted Finish Time</th>
+                <th className="py-4 px-5 sm:px-6">Progress</th>
+                <th className="py-4 px-5 sm:px-6 text-right">Penalties</th>
+                <th className="py-4 px-5 sm:px-6 text-right">Adjusted Time</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/[0.05]">
-              {state.rankings?.length === 0 && (
+              {rankings.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="py-16 text-center text-xs font-mono text-zinc-500">
+                  <td colSpan={5} className="py-16 text-center text-xs font-mono text-zinc-500">
                     NO SQUADS REGISTERED ON LIVE BOARD YET.
                   </td>
                 </tr>
               )}
-              {state.rankings?.map((r: any) => {
+              {rankings.map((r) => {
                 const isFirst = r.rank === 1;
                 const isSecond = r.rank === 2;
                 const isThird = r.rank === 3;
+                const totalSteps = r.totalSteps || 11;
+                const completedStages = r.completedStages ?? 0;
+                const pct = Math.min(100, Math.round((completedStages / totalSteps) * 100));
+                const netMins = r.netAdjustmentMins ?? 0;
 
                 const rankDisplay = isFirst ? (
                   <div className="flex items-center gap-2.5">
@@ -168,32 +202,72 @@ export default function Spectator() {
                 return (
                   <tr
                     key={r.teamId}
-                    className={`transition-colors ${
-                      isFirst ? 'bg-amber-500/[0.04]' : 'hover:bg-white/[0.02]'
+                    onClick={() => setSelectedTeamId(r.teamId)}
+                    className={`transition-colors cursor-pointer group ${
+                      isFirst ? 'bg-amber-500/[0.04] hover:bg-amber-500/[0.08]' : 'hover:bg-white/[0.04]'
                     }`}
                   >
                     <td className="py-4 px-5 sm:px-6">{rankDisplay}</td>
                     <td className="py-4 px-5 sm:px-6">
-                      <p className="font-extrabold text-base sm:text-xl text-white tracking-tight">{r.teamName}</p>
-                      {r.finished && (
+                      <p className="font-extrabold text-base sm:text-xl text-white tracking-tight group-hover:text-cyan-300 transition-colors">
+                        {r.teamName}
+                      </p>
+                      {r.finished ? (
                         <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-400 font-mono mt-0.5">
                           <CheckIcon className="w-3.5 h-3.5" />
                           <span>Verified Finish</span>
                         </span>
+                      ) : (
+                        <span className="text-xs font-mono text-zinc-400 block mt-0.5 truncate max-w-[210px]">
+                          {r.currentStageTitle}
+                        </span>
                       )}
                     </td>
-                    <td className="py-4 px-5 sm:px-6 text-center">
-                      <span className="inline-block px-3.5 py-1 rounded-full bg-white/[0.05] border border-white/10 text-xs sm:text-sm font-mono text-zinc-200 font-bold tabular-nums">
-                        Stage {r.currentLevel}
-                      </span>
+                    <td className="py-4 px-5 sm:px-6 min-w-[160px]">
+                      <div className="flex flex-col gap-1.5">
+                        <div className="flex items-center justify-between text-xs font-mono">
+                          <span className="text-zinc-300 font-bold tabular-nums">
+                            {completedStages}/{totalSteps} Cleared
+                          </span>
+                          <span className="text-zinc-500 tabular-nums">{pct}%</span>
+                        </div>
+                        <div className="w-full h-2 rounded-full bg-zinc-900/90 border border-white/[0.07] overflow-hidden">
+                          <div
+                            className={`h-full transition-all duration-500 ${
+                              r.finished ? 'bg-emerald-400' : 'bg-cyan-400'
+                            }`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-4 px-5 sm:px-6 text-right font-mono tabular-nums">
+                      {netMins > 0 ? (
+                        <span className="inline-block px-2.5 py-0.5 rounded-lg bg-rose-500/15 border border-rose-500/35 text-rose-300 text-xs font-bold">
+                          +{netMins}m
+                        </span>
+                      ) : netMins < 0 ? (
+                        <span className="inline-block px-2.5 py-0.5 rounded-lg bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 text-xs font-bold">
+                          {netMins}m
+                        </span>
+                      ) : (
+                        <span className="text-xs text-zinc-500">Clean</span>
+                      )}
                     </td>
                     <td className="py-4 px-5 sm:px-6 text-right font-mono tabular-nums">
                       {r.finished && r.adjustedTimeSecs != null ? (
-                        <span className="text-xl sm:text-2xl font-black text-emerald-400 tracking-tight">
-                          {formatMs(r.adjustedTimeSecs * 1000)}
-                        </span>
+                        <div>
+                          <span className="text-xl sm:text-2xl font-black text-emerald-400 tracking-tight block">
+                            {formatMs(r.adjustedTimeSecs * 1000)}
+                          </span>
+                          <span className="text-[10px] text-zinc-500 block">
+                            Base {formatDurationSecs(r.rawElapsedSecs)}
+                          </span>
+                        </div>
                       ) : (
-                        <span className="text-xs sm:text-sm font-medium text-zinc-500">Racing in Field…</span>
+                        <span className="text-xs sm:text-sm font-medium text-cyan-300/80 group-hover:text-cyan-300">
+                          View Splits →
+                        </span>
                       )}
                     </td>
                   </tr>
@@ -208,6 +282,11 @@ export default function Spectator() {
       <footer className="text-center py-4 border-t border-white/[0.08] text-xs font-mono text-zinc-500 tracking-wider">
         Designed and developed by <span className="text-cyan-400 font-semibold">Anonymous_SDMCET</span>
       </footer>
+
+      <SquadBreakdownModal
+        ranking={selectedRanking}
+        onClose={() => setSelectedTeamId(null)}
+      />
     </div>
   );
 }

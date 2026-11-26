@@ -51,7 +51,7 @@ async function purgeTestSquads() {
     if (game) {
       await prisma.game.update({
         where: { id: game.id },
-        data: { maxTeams: 50, registrationOpen: true, status: 'idle' },
+        data: { maxTeams: 25, registrationOpen: true, status: 'idle', startedAt: null, pausedAt: null, endedAt: null, totalPausedMs: 0 },
       });
     }
   } catch {}

@@ -34,7 +34,7 @@ export interface SocialLinkItem {
 }
 
 export interface PoolClue {
-  id: string;
+  id: number | string;
   title: string;
   clueText: string;
   locationHint: string;
@@ -181,19 +181,13 @@ export default function AdminLevels() {
   // Studio Mode: 'level' (objectives) | 'pool' (create & manage clue pool) | 'zones' (hazard & boundary zones)
   const [studioMode, setStudioMode] = useState<'level' | 'pool' | 'zones'>('level');
 
-  // Clue Pool State
-  const [poolClues, setPoolClues] = useState<PoolClue[]>(() => {
-    try {
-      const saved = localStorage.getItem('ch-custom-clue-pool');
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return [];
-  });
-
-  const [selectedPoolIds, setSelectedPoolIds] = useState<string[]>([]);
+  // Clue Pool State (DB-backed across coordinator devices)
+  const [poolClues, setPoolClues] = useState<PoolClue[]>([]);
+  const [selectedPoolIds, setSelectedPoolIds] = useState<Array<number | string>>([]);
   const [editingPoolClue, setEditingPoolClue] = useState<PoolClue | null>(null);
   const [poolSearch, setPoolSearch] = useState<string>('');
   const [isDeploying, setIsDeploying] = useState<boolean>(false);
+  const [isSavingPoolClue, setIsSavingPoolClue] = useState<boolean>(false);
 
   // Level Edit Form State
   const [editForm, setEditForm] = useState<any>(null);
@@ -224,9 +218,29 @@ export default function AdminLevels() {
     reload();
   }, []);
 
-  async function reload() {
+  async function reload(forceSelectFirst = false) {
     try {
-      const games = await api.getGames();
+      const [games, poolData] = await Promise.all([
+        api.getGames(),
+        api.getCluePool().catch(() => []),
+      ]);
+
+      // One-time automatic migration of any legacy browser-local clues into shared DB
+      let resolvedPool = poolData;
+      try {
+        const legacyRaw = localStorage.getItem('ch-custom-clue-pool');
+        if (legacyRaw) {
+          const legacyItems = JSON.parse(legacyRaw);
+          if (Array.isArray(legacyItems) && legacyItems.length > 0) {
+            const migrated = await api.importJsonToPool(legacyItems);
+            resolvedPool = migrated.items;
+          }
+          localStorage.removeItem('ch-custom-clue-pool');
+        }
+      } catch {}
+
+      setPoolClues(resolvedPool);
+
       const activeGame = games[0] ?? null;
       setGame(activeGame);
       if (activeGame) {
@@ -238,20 +252,12 @@ export default function AdminLevels() {
         setLevels(sorted);
         setZones(znData);
 
-        if (sorted.length > 0 && !selectedLevelId) {
+        if (sorted.length > 0 && (forceSelectFirst || !selectedLevelId || !sorted.some((l) => l.id === selectedLevelId))) {
           selectLevel(sorted[0]);
         }
       }
     } catch (err) {
       console.error('Failed to load levels & zones:', err);
-    }
-  }
-
-  function savePoolClues(clues: PoolClue[]) {
-    try {
-      localStorage.setItem('ch-custom-clue-pool', JSON.stringify(clues));
-    } catch (e) {
-      console.error('Failed to save clue pool', e);
     }
   }
 
@@ -396,10 +402,10 @@ export default function AdminLevels() {
     }
   }
 
-  // Clue Pool Handlers
+  // Clue Pool Handlers (Shared DB-backed)
   function handleOpenCreatePoolClue() {
     setEditingPoolClue({
-      id: `pool-${Date.now()}`,
+      id: 'new',
       title: `Pool Landmark ${poolClues.length + 1}`,
       clueText: '',
       locationHint: '',
@@ -417,7 +423,7 @@ export default function AdminLevels() {
     });
   }
 
-  function handleSavePoolClue(clue: PoolClue) {
+  async function handleSavePoolClue(clue: PoolClue) {
     if (!clue.title.trim()) {
       toast('Please enter a title for the clue.', 'warn');
       return;
@@ -429,79 +435,114 @@ export default function AdminLevels() {
         platform: l.platform.trim() || 'Link',
         url: l.url.trim(),
       }));
-    const cleanClue: PoolClue = { ...clue, socialLinks: sanitizedLinks };
 
-    const idx = poolClues.findIndex((c) => c.id === cleanClue.id);
-    let updated: PoolClue[];
-    if (idx >= 0) {
-      updated = [...poolClues];
-      updated[idx] = cleanClue;
-    } else {
-      updated = [...poolClues, cleanClue];
-    }
+    const payload = {
+      title: clue.title.trim(),
+      clueText: clue.clueText,
+      locationHint: clue.locationHint,
+      answer: clue.answer,
+      targetLat: clue.targetLat,
+      targetLng: clue.targetLng,
+      triggerRadiusMeters: clue.triggerRadiusMeters,
+      isFinal: clue.isFinal,
+      hints: clue.hints,
+      socialLinks: sanitizedLinks,
+    };
 
-    setPoolClues(updated);
-    savePoolClues(updated);
-    if (!selectedPoolIds.includes(cleanClue.id)) {
-      setSelectedPoolIds((prev) => [...prev, cleanClue.id]);
+    setIsSavingPoolClue(true);
+    try {
+      const isNew = typeof clue.id !== 'number';
+      const saved: PoolClue = isNew
+        ? await api.createPoolClue(payload)
+        : await api.updatePoolClue(Number(clue.id), payload);
+
+      setPoolClues((prev) =>
+        isNew ? [...prev, saved] : prev.map((c) => (c.id === saved.id ? saved : c)),
+      );
+      if (!selectedPoolIds.includes(saved.id)) {
+        setSelectedPoolIds((prev) => [...prev, saved.id]);
+      }
+      setEditingPoolClue(null);
+      toast('Saved clue to shared Clue Pool.', 'success');
+    } catch (err: any) {
+      toast(err.message ?? 'Failed to save clue to pool', 'error');
+    } finally {
+      setIsSavingPoolClue(false);
     }
-    setEditingPoolClue(null);
-    toast('Saved clue to local pool.', 'success');
   }
 
-  async function handleDeletePoolClue(id: string) {
+  async function handleDeletePoolClue(id: number | string) {
     const ok = await uiConfirm({
       title: 'Remove Clue from Pool?',
-      message: 'This removes the clue from your saved library.',
+      message: 'This removes the clue from the shared coordinator library.',
       confirmLabel: 'Remove Clue',
       tone: 'danger',
     });
     if (!ok) return;
-    const updated = poolClues.filter((c) => c.id !== id);
-    setPoolClues(updated);
-    savePoolClues(updated);
-    setSelectedPoolIds((prev) => prev.filter((i) => i !== id));
-    if (editingPoolClue?.id === id) {
-      setEditingPoolClue(null);
+    try {
+      if (typeof id === 'number') {
+        await api.deletePoolClue(id);
+      }
+      setPoolClues((prev) => prev.filter((c) => c.id !== id));
+      setSelectedPoolIds((prev) => prev.filter((i) => i !== id));
+      if (editingPoolClue?.id === id) {
+        setEditingPoolClue(null);
+      }
+      toast('Removed clue from pool.', 'warn');
+    } catch (err: any) {
+      toast(err.message ?? 'Failed to remove clue', 'error');
     }
-    toast('Removed clue from pool.', 'warn');
   }
 
-  function handleImportFromActiveGame() {
-    if (levels.length === 0) {
+  async function handleImportFromActiveGame() {
+    if (!game || levels.length === 0) {
       toast('No active stages to import. Create stages in Active Stages first.', 'warn');
       return;
     }
 
-    const imported: PoolClue[] = levels.map((lvl) => ({
-      id: `pool-${lvl.id}-${Date.now()}`,
-      title: lvl.title,
-      clueText: lvl.clueText || '',
-      locationHint: lvl.locationHint || '',
-      answer: lvl.answer || '',
-      targetLat: lvl.targetLat,
-      targetLng: lvl.targetLng,
-      triggerRadiusMeters: lvl.triggerRadiusMeters ?? 25,
-      isFinal: Boolean(lvl.isFinal),
-      hints: (lvl.hints || []).map((h: any) => ({ text: h.text, penaltyMins: h.penaltyMins })),
-      socialLinks: (lvl.socialLinks || []).map((s: any) => ({ platform: s.platform, url: s.url })),
-    }));
-
-    const existingTitles = new Set(poolClues.map((c) => c.title.toLowerCase().trim()));
-    const newItems = imported.filter((c) => !existingTitles.has(c.title.toLowerCase().trim()));
-
-    if (newItems.length === 0) {
-      toast('All active game objectives already exist in your Clue Pool.', 'info');
-      return;
+    try {
+      const res = await api.importActiveToPool(game.id);
+      setPoolClues(res.items);
+      if (res.importedCount === 0) {
+        toast('All active game objectives already exist in the shared Clue Pool.', 'info');
+      } else {
+        toast(`Imported ${res.importedCount} clue(s) into the shared Clue Pool.`, 'success');
+      }
+    } catch (err: any) {
+      toast(err.message ?? 'Failed to import active clues', 'error');
     }
-
-    const updated = [...poolClues, ...newItems];
-    setPoolClues(updated);
-    savePoolClues(updated);
-    toast(`Imported ${newItems.length} clues into your Clue Pool.`, 'success');
   }
 
-  function togglePoolSelection(id: string) {
+  function handleExportPoolJson() {
+    if (poolClues.length === 0) return;
+    const blob = new Blob([JSON.stringify(poolClues, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `SDMCET_Clue_Pool_${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleImportPoolJsonFile(file: File) {
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        toast('JSON file must contain a non-empty array of clues.', 'warn');
+        return;
+      }
+      const res = await api.importJsonToPool(parsed);
+      setPoolClues(res.items);
+      toast(`Imported ${res.importedCount} new clue(s) into the shared Clue Pool.`, 'success');
+    } catch (err: any) {
+      toast(err.message ?? 'Invalid Clue Pool JSON file', 'error');
+    }
+  }
+
+  function togglePoolSelection(id: number | string) {
     setSelectedPoolIds((prev) =>
       prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id],
     );
@@ -519,8 +560,7 @@ export default function AdminLevels() {
     setIsDeploying(true);
     try {
       const res = await api.generateFiestaPack(game.id);
-      setSelectedLevelId(null);
-      await reload();
+      await reload(true);
       toast(`Loaded ${res.count ?? 14} Fiesta 2026 stages.`, 'success');
     } catch (err: any) {
       toast(err.message ?? 'Failed to load Fiesta 2026 pack', 'error');
@@ -548,7 +588,7 @@ export default function AdminLevels() {
     setIsDeploying(true);
     try {
       const res = await api.deployPool(game.id, selected);
-      await reload();
+      await reload(true);
       setStudioMode('level');
       toast(`Deployed ${res.count || selected.length} clues to the active game.`, 'success');
     } catch (err: any) {
@@ -1278,12 +1318,37 @@ export default function AdminLevels() {
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={handleExportPoolJson}
+                      disabled={poolClues.length === 0}
+                      className="px-2 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-zinc-300 text-[11px] font-mono rounded-xl border border-zinc-700 transition-all"
+                      title="Download Clue Pool JSON backup"
+                    >
+                      Export
+                    </button>
+                    <label
+                      className="cursor-pointer px-2 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[11px] font-mono rounded-xl border border-zinc-700 transition-all"
+                      title="Import Clue Pool from JSON file"
+                    >
+                      Import JSON
+                      <input
+                        type="file"
+                        accept="application/json,.json"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.currentTarget.files?.[0];
+                          if (f) handleImportPoolJsonFile(f);
+                          e.currentTarget.value = '';
+                        }}
+                      />
+                    </label>
                     <button
                       type="button"
                       onClick={handleImportFromActiveGame}
                       className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-mono rounded-xl border border-zinc-700 transition-all"
-                      title="Save active hunt stages into the pool"
+                      title="Save active hunt stages into the shared pool"
                     >
                       Import Active
                     </button>
@@ -1588,10 +1653,11 @@ export default function AdminLevels() {
                       </button>
                       <button
                         type="button"
+                        disabled={isSavingPoolClue}
                         onClick={() => handleSavePoolClue(editingPoolClue)}
-                        className="px-4 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-zinc-950 text-xs font-bold font-mono shadow"
+                        className="px-4 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 disabled:opacity-60 text-zinc-950 text-xs font-bold font-mono shadow"
                       >
-                        Save to Pool ✓
+                        {isSavingPoolClue ? 'Saving…' : 'Save to Pool ✓'}
                       </button>
                     </div>
                   </div>

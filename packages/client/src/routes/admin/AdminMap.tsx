@@ -233,6 +233,14 @@ export default function AdminMap() {
     } catch {}
   }
 
+  // Total steps derived dynamically from levels
+  const totalSteps = useMemo(() => {
+    if (levels.length === 0) return 11;
+    const intermediate = levels.filter((l) => !l.isFinal).length;
+    const hasFinal = levels.some((l) => l.isFinal);
+    return Math.min(10, intermediate) + (hasFinal ? 1 : 0);
+  }, [levels]);
+
   // Combined teams with their resolved latest locations
   const teamsWithLocations = useMemo(() => {
     return teams.map((team) => {
@@ -245,6 +253,7 @@ export default function AdminMap() {
       const activeProgress = team.levelProgress?.find((p: any) => !p.completedAt);
       const completedCount = team.levelProgress?.filter((p: any) => p.completedAt).length ?? 0;
       const currentStep = activeProgress?.stepNumber ?? (completedCount + (isFinished ? 0 : 1));
+      const teamTotalSteps = team.totalSteps ?? totalSteps;
 
       return {
         ...team,
@@ -254,10 +263,11 @@ export default function AdminMap() {
         hasLocation: lat != null && lng != null,
         isFinished,
         currentStep,
+        teamTotalSteps,
         activeLevelTitle: activeProgress?.level?.title ?? (isFinished ? 'Completed Hunt 🏁' : 'Objective 1'),
       };
     });
-  }, [teams, liveLocations]);
+  }, [teams, liveLocations, totalSteps]);
 
   // Teams that have a physical GPS location on map
   const mappedTeams = useMemo(() => {
@@ -565,7 +575,7 @@ export default function AdminMap() {
                   <div className="p-1 font-mono text-xs text-white">
                     <div className="font-bold text-cyan-300">{team.name}</div>
                     <div className="text-[10px] text-zinc-300">
-                      {team.isFinished ? 'Finished' : `Step ${team.currentStep}/10`}
+                      {team.isFinished ? 'Finished' : `Step ${team.currentStep}/${team.teamTotalSteps}`}
                     </div>
                   </div>
                 </Tooltip>
@@ -592,7 +602,7 @@ export default function AdminMap() {
                     </span>
                   ) : (
                     <span className="px-1.5 py-0.2 rounded bg-cyan-950/60 text-cyan-300 border border-cyan-500/30 text-[9px] font-bold font-mono">
-                      Step {activeFocusTeam.currentStep} / 10
+                      Step {activeFocusTeam.currentStep} / {activeFocusTeam.teamTotalSteps}
                     </span>
                   )}
                 </div>

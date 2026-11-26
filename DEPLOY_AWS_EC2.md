@@ -9,16 +9,15 @@ This guide explains how to deploy the **Anonymous SDMCET Campus Hunt** applicati
 1. Log into your **AWS Management Console** → Go to **EC2** → Click **Launch Instance**.
 2. **Name**: `Campus-Hunt-Server`
 3. **OS**: **Ubuntu Server 24.04 LTS** (or 22.04 LTS) — 64-bit (x86_64).
-4. **Instance Type**: 
-   - `t3.micro` or `t2.micro` (Free Tier eligible) is sufficient.
-   - For 100+ simultaneous teams, `t3.small` (2 vCPU, 2 GB RAM) is recommended.
+4. **Instance Type**:
+   - `t3.small` (2 vCPU, 2 GB RAM) is recommended for 25–100+ simultaneous teams.
 5. **Key pair**: Select or create an SSH key pair (`.pem`) to connect.
 6. **Network Settings (Security Group)**:
    Ensure the following inbound ports are open:
-   - **Port 22 (SSH)** — Source: `My IP` (or `0.0.0.0/0`)
+   - **Port 22 (SSH)** — Source: `My IP`
    - **Port 80 (HTTP)** — Source: `0.0.0.0/0` (Needed for Caddy Let's Encrypt challenge)
    - **Port 443 (HTTPS)** — Source: `0.0.0.0/0` (Needed for secure GPS geolocation)
-7. Click **Launch Instance** and note your **Public IPv4 Address** (e.g. `13.233.50.120`).
+7. Click **Launch Instance** and note your **Public IPv4 Address** (e.g. `13.126.101.127`).
 
 ---
 
@@ -42,7 +41,7 @@ Log out and log back in (or run `newgrp docker`) so your user can run docker wit
 
 ---
 
-## 📥 Step 4: Clone the Repository & Configure
+## 📥 Step 4: Clone the Repository & Configure Production Secrets
 
 ```bash
 # Clone the repository
@@ -53,22 +52,27 @@ cd Anonymous-Feista-26
 cp .env.example .env
 ```
 
+Generate a strong JWT secret on EC2:
+```bash
+openssl rand -hex 32
+```
+
 Now open `.env` using `nano`:
 ```bash
 nano .env
 ```
-Update the `DOMAIN` variable using your **EC2 Public IP** and **nip.io**:
+Update the required variables:
 ```env
-# Example: if your EC2 public IP is 13.233.50.120:
-DOMAIN=13.233.50.120.nip.io
+DOMAIN=13.126.101.127.nip.io
 ACME_EMAIL=your-email@gmail.com
-ADMIN_PASSWORD=admin123
+JWT_SECRET=<paste-64-char-hex-from-openssl>
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=<strong-unique-password-at-least-8-chars>
+FORCE_SEED=false
 ```
-*(Tip: `nip.io` is a free public wildcard DNS. Any request to `13.233.50.120.nip.io` automatically resolves to `13.233.50.120`. Caddy will immediately issue a valid Let's Encrypt HTTPS certificate for it!)*
+*(Important: Production boot strictly rejects missing/default `JWT_SECRET` or weak `ADMIN_PASSWORD` values such as `admin123`.)*
 
 If you have a custom domain (e.g., `hunt.anonymoussdmcet.in`), point an **A record** to your EC2 IP and set `DOMAIN=hunt.anonymoussdmcet.in`.
-
-Save and exit nano (`Ctrl + O`, `Enter`, `Ctrl + X`).
 
 ---
 
@@ -81,19 +85,16 @@ docker compose up -d --build
 
 Docker will:
 1. Compile both the Vite React PWA and Express TypeScript backend.
-2. Launch the unified application container.
-3. Automatically run database migrations and seed default SDMCET campus targets.
-4. Launch Caddy to request and configure a trusted HTTPS certificate.
+2. Back up any existing `/data/dev.db` into `/data/backups/` and run non-destructive Prisma migrations (`prisma migrate deploy`).
+3. Seed default SDMCET campus targets, shared Clue Pool, and demo teams when initializing a fresh DB.
+4. Wait until `/api/v1/health` reports healthy (`db: ok`), then start Caddy to configure trusted HTTPS.
 
-Check running containers:
+Verify health and containers:
 ```bash
 docker compose ps
+curl -fsS https://<YOUR_DOMAIN>/api/v1/health
 ```
-
-View live logs:
-```bash
-docker compose logs -f
-```
+Expected response: `{"ok":true,"db":"ok","uptimeSecs":...}`.
 
 ---
 
@@ -101,29 +102,32 @@ docker compose logs -f
 
 Open your mobile browser or laptop:
 - **Participant Portal**: `https://<YOUR_DOMAIN>/login`
-  - Demo Call-signs: `Team Alpha` (code: `hunt2026`) or `Team Beta` (code: `fiesta26`)
+- **Squad Registration**: `https://<YOUR_DOMAIN>/register`
 - **Admin Command Desk**: `https://<YOUR_DOMAIN>/admin/login`
-  - Credentials: `admin` / `<ADMIN_PASSWORD>`
 - **Live Spectator Board**: `https://<YOUR_DOMAIN>/spectator`
-
-> **Note on GPS:** Because the connection is served over valid `https://`, mobile Safari and Android Chrome will automatically permit high-accuracy GPS tracking across the SDMCET campus grounds!
 
 ---
 
-## 🔄 Useful Maintenance Commands
+## 💾 SQLite Backups & Maintenance Commands
 
+Automatic pre-migration backups are written to `./data/backups/` on container boot (retaining the latest 5 snapshots). To take a manual live backup safely without stopping the app:
 ```bash
-# Stop the containers
-docker compose down
+docker compose exec app node -e '
+  const { PrismaClient } = require("@prisma/client");
+  const p = new PrismaClient();
+  p.$queryRawUnsafe("PRAGMA wal_checkpoint(TRUNCATE);").finally(() => p.$disconnect());
+'
+cp ./data/dev.db "./data/backups/manual-$(date +%Y%m%d%H%M%S).db"
+```
 
-# Restart the containers
-docker compose restart
+Useful operational commands:
+```bash
+# Check container health & status
+docker compose ps
 
-# View Caddy SSL logs
-docker compose logs caddy
-
-# View Node.js server logs
-docker compose logs app
+# View Node.js / Caddy logs
+docker compose logs -f --tail=50 app
+docker compose logs -f --tail=50 caddy
 
 # Pull latest updates from GitHub and redeploy
 git pull origin main

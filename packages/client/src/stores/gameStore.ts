@@ -8,14 +8,17 @@ export interface LevelProgress {
   locationReachedAt: string | null;
   completedAt: string | null;
   hintsUsed: number;
+  freeHintsRemaining?: number;
   hintReveals: { hintId: number }[];
   level: {
     id: number;
     orderIndex: number;
     title: string;
     clueText: string;
+    clueLocked?: boolean;
     locationHint: string;
-    answer: string;
+    requiresAnswer?: boolean;
+    answer?: string;
     targetLat: number | null;
     targetLng: number | null;
     triggerRadiusMeters: number | null;
@@ -23,7 +26,7 @@ export interface LevelProgress {
     isFinal: boolean;
     mapOverlayGeoJson: string | null;
     socialLinks: { platform: string; url: string }[];
-    hints: { id: number; orderIndex: number; text: string; penaltyMins: number }[];
+    hints: { id: number; orderIndex: number; text?: string; penaltyMins: number; revealed?: boolean }[];
     checkpoints: any[];
   };
 }
@@ -41,13 +44,49 @@ export interface GameState {
   zones: any[];
 }
 
+export interface StageSplitEntry {
+  stepNumber: number;
+  title: string;
+  isFinal: boolean;
+  unlockedAt: string;
+  locationReachedAt: string | null;
+  completedAt: string | null;
+  completedBy: string | null;
+  hintsUsed: number;
+  durationSecs: number | null;
+}
+
+export interface PenaltyLogEntry {
+  id: number;
+  kind: string;
+  minutes: number;
+  appliedAt: string;
+}
+
 export interface Ranking {
   rank: number;
   teamId: number;
   teamName: string;
   currentLevel: number;
+  totalSteps: number;
+  completedStages: number;
+  currentStageTitle: string;
+  locationReached: boolean;
+  rawElapsedSecs: number | null;
   adjustedTimeSecs: number | null;
+  hintPenaltyMins: number;
+  zonePenaltyMins: number;
+  adminPenaltyMins: number;
+  bonusMins: number;
+  totalPenaltyMins: number;
+  netAdjustmentMins: number;
+  hintsUsedCount: number;
+  startedAt: string | null;
+  finishedAt: string | null;
+  latestPhotoStatus: string | null;
   finished: boolean;
+  stageBreakdown: StageSplitEntry[];
+  penaltyLog: PenaltyLogEntry[];
 }
 
 export interface LatestPhoto {
@@ -94,7 +133,6 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   setConnected: (connected) => set({ connected }),
   currentLevel: () => {
     const { progress } = get();
-    // Last unlocked level that isn't completed, or last completed if all done
     const unlocked = progress.filter((p) => p.unlockedAt);
     return (
       unlocked.find((p) => !p.completedAt) ??

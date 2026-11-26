@@ -119,12 +119,21 @@ export default function AdminGame() {
     socket.on('game:status', handleStatus);
 
     socket.on('admin:photo_submitted', (data: any) => {
-      setPendingPhotosCount((c) => c + 1);
-      addLog(`New verification photo submitted by ${data?.teamName ?? 'Team'}`, 'info');
+      const teamLabel = data?.photo?.team?.name ?? data?.teamName ?? 'Team';
+      addLog(`New verification photo submitted by ${teamLabel}`, 'info');
+      reload();
     });
 
     socket.on('admin:occupancy_update', (matrix: any[]) => {
       setOccupancyMatrix(matrix);
+    });
+
+    socket.on('admin:zone_breach', (data: any) => {
+      addLog(
+        `ZONE BREACH: ${data.teamName ?? 'Team'} entered ${data.label ?? 'Restricted Area'} (+${data.penaltyMins}m)`,
+        'alert',
+      );
+      reload();
     });
 
     socket.on('team:checkpoint_reached', (data: any) => {
@@ -145,6 +154,8 @@ export default function AdminGame() {
       socket.off('game:status_changed', handleStatus);
       socket.off('game:status', handleStatus);
       socket.off('admin:photo_submitted');
+      socket.off('admin:occupancy_update');
+      socket.off('admin:zone_breach');
       socket.off('team:checkpoint_reached');
       socket.off('level:unlocked');
       socket.off('winner:declared');
@@ -338,7 +349,7 @@ export default function AdminGame() {
       if (!matchesSearch) return false;
 
       const isFinished = Boolean(t.finishedAt);
-      const activeProg = t.levelProgress?.[0];
+      const activeProg = t.levelProgress?.find((p: any) => !p.completedAt) ?? t.levelProgress?.[0];
       const currentStepNumber = activeProg?.stepNumber ?? 1;
       const isFinalLevel = Boolean(activeProg?.level?.isFinal) || (totalSteps > 0 && currentStepNumber >= totalSteps);
 
@@ -355,7 +366,7 @@ export default function AdminGame() {
     const active = total - finished;
     const atFinale = teams.filter((t) => {
       if (t.finishedAt) return false;
-      const activeProg = t.levelProgress?.[0];
+      const activeProg = t.levelProgress?.find((p: any) => !p.completedAt) ?? t.levelProgress?.[0];
       const currentStepNumber = activeProg?.stepNumber ?? 1;
       return Boolean(activeProg?.level?.isFinal) || (totalSteps > 0 && currentStepNumber >= totalSteps);
     }).length;
@@ -647,13 +658,14 @@ export default function AdminGame() {
           {/* Clean, De-cluttered Team Rows */}
           <div className="space-y-2 mt-1">
             {filteredTeams.map((team) => {
-              const activeProgress = team.levelProgress?.[0];
+              const activeProgress = team.levelProgress?.find((p: any) => !p.completedAt) ?? team.levelProgress?.[0];
+              const teamTotalSteps = team.totalSteps ?? totalSteps;
               const currentStepNumber = activeProgress?.stepNumber ?? 1;
               const isFinished = Boolean(team.finishedAt);
               const isLoadingThis = actionLoadingTeamId === team.id;
               const reachedLocation = Boolean(activeProgress?.locationReachedAt);
               const penaltyMinutesTotal = team.penalties?.reduce((acc: number, p: any) => acc + (p.minutes || 0), 0) ?? 0;
-              const isAtFinale = Boolean(activeProgress?.level?.isFinal) || (totalSteps > 0 && currentStepNumber >= totalSteps);
+              const isAtFinale = Boolean(activeProgress?.level?.isFinal) || (teamTotalSteps > 0 && currentStepNumber >= teamTotalSteps);
               const isMenuOpen = openMenuTeamId === team.id;
 
               return (
@@ -675,7 +687,7 @@ export default function AdminGame() {
                         </span>
                       ) : (
                         <span className="text-[10px] font-mono text-zinc-300 bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800">
-                          Stage {currentStepNumber}/{totalSteps}
+                          Stage {currentStepNumber}/{teamTotalSteps}
                           {activeProgress?.level?.title ? ` · ${activeProgress.level.title}` : ''}
                         </span>
                       )}
@@ -1144,7 +1156,7 @@ export default function AdminGame() {
                   value={newCodeInput}
                   onChange={(e) => setNewCodeInput(e.target.value)}
                   placeholder="New code…"
-                  className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-xs font-mono text-white uppercase"
+                  className="flex-1 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-xs font-mono text-white"
                   required
                 />
                 <button

@@ -35,6 +35,8 @@ model TeamSession {
   revokedAt DateTime?
 
   team Team @relation(fields: [teamId], references: [id])
+
+  @@index([teamId])
 }
 
 model Game {
@@ -128,6 +130,7 @@ model TeamLevelProgress {
   hintReveals HintReveal[]
 
   @@unique([teamId, levelId])
+  @@index([teamId])
 }
 
 model TeamPath {
@@ -161,6 +164,8 @@ model Penalty {
   appliedAt DateTime
 
   team Team @relation(fields: [teamId], references: [id])
+
+  @@index([teamId])
 }
 
 model TeamCheckpoint {
@@ -197,6 +202,9 @@ model Photo {
   reviewNote  String?
 
   team Team @relation(fields: [teamId], references: [id])
+
+  @@index([teamId, submittedAt])
+  @@index([status])
 }
 
 model SosAlert {
@@ -217,6 +225,8 @@ model TeamLocation {
   recordedAt DateTime
 
   team Team @relation(fields: [teamId], references: [id])
+
+  @@index([teamId, recordedAt])
 }
 
 model Announcement {
@@ -228,4 +238,21 @@ model Announcement {
   sentAt       DateTime
 
   game Game @relation(fields: [gameId], references: [id])
+}
+
+model CluePoolItem {
+  id                  Int      @id @default(autoincrement())
+  title               String
+  clueText            String   @default("")
+  locationHint        String   @default("")
+  answer              String   @default("")
+  targetLat           Float?
+  targetLng           Float?
+  triggerRadiusMeters Int      @default(25)
+  durationSecs        Int?
+  isFinal             Boolean  @default(false)
+  hintsJson           String   @default("[]")
+  socialLinksJson     String   @default("[]")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 }

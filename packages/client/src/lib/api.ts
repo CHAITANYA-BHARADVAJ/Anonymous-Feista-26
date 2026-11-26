@@ -137,6 +137,22 @@ export const api = {
       body: JSON.stringify({ message, kind, targetTeamId }),
     }),
   getLevels: (gameId: number) => request<any[]>(`/levels/game/${gameId}`),
+  getCluePool: () => request<any[]>('/levels/pool'),
+  createPoolClue: (data: any) =>
+    request<any>('/levels/pool', { method: 'POST', body: JSON.stringify(data) }),
+  updatePoolClue: (id: number, data: any) =>
+    request<any>(`/levels/pool/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deletePoolClue: (id: number) =>
+    request<any>(`/levels/pool/${id}`, { method: 'DELETE' }),
+  importActiveToPool: (gameId: number) =>
+    request<{ importedCount: number; items: any[] }>(`/levels/pool/import-active/${gameId}`, {
+      method: 'POST',
+    }),
+  importJsonToPool: (items: any[]) =>
+    request<{ importedCount: number; items: any[] }>('/levels/pool/import-json', {
+      method: 'POST',
+      body: JSON.stringify({ items }),
+    }),
   generateFiestaPack: (gameId: number) => request<any>(`/levels/game/${gameId}/generate-fiesta-pack`, { method: 'POST' }),
   generate26Pack: (gameId: number) => request<any>(`/levels/game/${gameId}/generate-25-pack`, { method: 'POST' }),
   deployPool: (gameId: number, poolClues: any[]) =>

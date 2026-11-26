@@ -18,11 +18,11 @@ export default function AdminLayout() {
     loadBadges();
 
     const socket = getSocket();
-    socket.on('admin:photo_submitted', () => setPendingPhotos((c) => c + 1));
+    socket.on('admin:photo_submitted', loadBadges);
 
     return () => {
       cleanup();
-      socket.off('admin:photo_submitted');
+      socket.off('admin:photo_submitted', loadBadges);
     };
   }, []);
 

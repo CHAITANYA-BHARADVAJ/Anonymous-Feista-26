@@ -173,7 +173,7 @@ async function runConcurrency25Squads() {
 
   // 6. Clean up the registered test squads
   process.stdout.write(`5. Cleaning up ${squadTokens.length} test squads from database... `);
-  await Promise.all(
+  const delResults = await Promise.all(
     squadTokens.map((squad) =>
       request(`/admin/teams/${squad.id}`, {
         method: 'DELETE',
@@ -181,8 +181,14 @@ async function runConcurrency25Squads() {
       }).catch(() => null),
     ),
   );
-  console.log('✅ PASSED (Clean state restored)');
-  passed++;
+  const delSuccess = delResults.filter((r) => r?.status === 200).length;
+  if (delSuccess === squadTokens.length) {
+    console.log(`✅ PASSED (${delSuccess}/${squadTokens.length} deleted cleanly)`);
+    passed++;
+  } else {
+    console.log(`❌ FAILED (Only ${delSuccess}/${squadTokens.length} deleted cleanly)`);
+    failed++;
+  }
 
   // Restore game capacity limit to default 25
   await request(`/games/${gameId}/settings`, {

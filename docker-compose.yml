@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   app:
     build:
@@ -11,9 +9,9 @@ services:
       - NODE_ENV=production
       - PORT=3001
       - DATABASE_URL=file:/data/dev.db
-      - JWT_SECRET=${JWT_SECRET:-tactical_sdmcet_secret_key_2026_change_me}
+      - JWT_SECRET=${JWT_SECRET:?Set JWT_SECRET in .env (e.g. openssl rand -hex 32)}
       - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:?Set a strong ADMIN_PASSWORD in .env (>= 8 chars)}
       - CLIENT_URL=https://${DOMAIN:-localhost}
       - FORCE_SEED=${FORCE_SEED:-false}
     volumes:
@@ -21,6 +19,12 @@ services:
       - ./uploads:/app/packages/server/uploads
     expose:
       - "3001"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/v1/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     ulimits:
       nofile:
         soft: 65535
@@ -47,7 +51,8 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
-      - app
+      app:
+        condition: service_healthy
     networks:
       - hunt-net
 

@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { prisma } from '../lib/prisma';
 import { requireAuth } from '../middleware/auth';
 import { FIESTA_2026_PACK } from '../data/fiesta2026Pack';
+import { asyncHandler, parsePositiveInt } from '../lib/asyncHandler';
+import { invalidateLeaderboardCache } from '../services/scoreService';
 
 const router = Router();
 
@@ -20,17 +22,101 @@ interface LevelSeedInput {
   socialLinks?: Array<{ platform?: string; url: string }>;
 }
 
-/** Atomically replace all levels, hints, links, and active run progress for a game. */
+function parseOptionalNumber(val: unknown): number | null {
+  if (val === '' || val === null || val === undefined) return null;
+  const n = Number(val);
+  return Number.isFinite(n) ? n : null;
+}
+
+function sanitizeLevelUpdateData(body: Record<string, any>) {
+  const data: Record<string, any> = {};
+  if (typeof body.title === 'string') data.title = body.title.trim();
+  if (typeof body.clueText === 'string') data.clueText = body.clueText.trim();
+  if (typeof body.locationHint === 'string') data.locationHint = body.locationHint.trim();
+  if (typeof body.answer === 'string') data.answer = body.answer.trim();
+  if (body.isFinal !== undefined) data.isFinal = Boolean(body.isFinal);
+  if (body.orderIndex !== undefined && Number.isFinite(Number(body.orderIndex))) {
+    data.orderIndex = Math.max(1, Math.round(Number(body.orderIndex)));
+  }
+  if ('targetLat' in body) data.targetLat = parseOptionalNumber(body.targetLat);
+  if ('targetLng' in body) data.targetLng = parseOptionalNumber(body.targetLng);
+  if ('triggerRadiusMeters' in body) {
+    const r = parseOptionalNumber(body.triggerRadiusMeters);
+    data.triggerRadiusMeters = r != null ? Math.max(5, Math.round(r)) : 25;
+  }
+  if ('durationSecs' in body) {
+    const d = parseOptionalNumber(body.durationSecs);
+    data.durationSecs = d != null ? Math.max(1, Math.round(d)) : null;
+  }
+  if ('mapOverlayGeoJson' in body) {
+    data.mapOverlayGeoJson = typeof body.mapOverlayGeoJson === 'string' ? body.mapOverlayGeoJson : null;
+  }
+  return data;
+}
+
+function serializePoolRow(row: any) {
+  let hints: Array<{ text: string; penaltyMins: number }> = [];
+  let socialLinks: Array<{ platform: string; url: string }> = [];
+  try {
+    const parsedHints = JSON.parse(row.hintsJson || '[]');
+    if (Array.isArray(parsedHints)) hints = parsedHints;
+  } catch {}
+  try {
+    const parsedLinks = JSON.parse(row.socialLinksJson || '[]');
+    if (Array.isArray(parsedLinks)) socialLinks = parsedLinks;
+  } catch {}
+
+  return {
+    id: row.id,
+    title: row.title,
+    clueText: row.clueText,
+    locationHint: row.locationHint,
+    answer: row.answer,
+    targetLat: row.targetLat,
+    targetLng: row.targetLng,
+    triggerRadiusMeters: row.triggerRadiusMeters,
+    durationSecs: row.durationSecs,
+    isFinal: row.isFinal,
+    hints,
+    socialLinks,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+/** Atomically replace all levels, hints, links, and active run progress scoped strictly to a single game. */
 async function replaceGameLevels(gameId: number, items: LevelSeedInput[]) {
   await prisma.$transaction(async (tx) => {
-    await tx.teamPath.deleteMany({});
-    await tx.hintReveal.deleteMany({});
-    await tx.teamLevelProgress.deleteMany({});
-    await tx.teamCheckpoint.deleteMany({});
-    await tx.hint.deleteMany({});
-    await tx.checkpoint.deleteMany({});
-    await tx.socialLink.deleteMany({});
-    await tx.level.deleteMany({ where: { gameId } });
+    const existingLevels = await tx.level.findMany({ where: { gameId }, select: { id: true } });
+    const levelIds = existingLevels.map((l) => l.id);
+
+    if (levelIds.length > 0) {
+      const progressRows = await tx.teamLevelProgress.findMany({
+        where: { levelId: { in: levelIds } },
+        select: { id: true },
+      });
+      const progressIds = progressRows.map((p) => p.id);
+      if (progressIds.length > 0) {
+        await tx.hintReveal.deleteMany({ where: { progressId: { in: progressIds } } });
+      }
+      const hints = await tx.hint.findMany({ where: { levelId: { in: levelIds } }, select: { id: true } });
+      const hintIds = hints.map((h) => h.id);
+      if (hintIds.length > 0) {
+        await tx.hintReveal.deleteMany({ where: { hintId: { in: hintIds } } });
+      }
+      const checkpoints = await tx.checkpoint.findMany({ where: { levelId: { in: levelIds } }, select: { id: true } });
+      const cpIds = checkpoints.map((c) => c.id);
+      if (cpIds.length > 0) {
+        await tx.teamCheckpoint.deleteMany({ where: { checkpointId: { in: cpIds } } });
+      }
+
+      await tx.teamPath.deleteMany({ where: { levelId: { in: levelIds } } });
+      await tx.teamLevelProgress.deleteMany({ where: { levelId: { in: levelIds } } });
+      await tx.hint.deleteMany({ where: { levelId: { in: levelIds } } });
+      await tx.checkpoint.deleteMany({ where: { levelId: { in: levelIds } } });
+      await tx.socialLink.deleteMany({ where: { levelId: { in: levelIds } } });
+      await tx.level.deleteMany({ where: { gameId } });
+    }
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
@@ -41,19 +127,15 @@ async function replaceGameLevels(gameId: number, items: LevelSeedInput[]) {
         data: {
           gameId,
           orderIndex: item.orderIndex ?? i + 1,
-          title: item.title,
-          clueText: item.clueText || '',
-          locationHint: item.locationHint || '',
-          answer: item.answer || '',
+          title: (item.title || `Stage ${i + 1}`).trim(),
+          clueText: (item.clueText || '').trim(),
+          locationHint: (item.locationHint || '').trim(),
+          answer: (item.answer || '').trim(),
           isFinal,
-          targetLat: item.targetLat != null && item.targetLat !== '' ? Number(item.targetLat) : null,
-          targetLng: item.targetLng != null && item.targetLng !== '' ? Number(item.targetLng) : null,
-          triggerRadiusMeters:
-            item.triggerRadiusMeters != null && item.triggerRadiusMeters !== ''
-              ? Number(item.triggerRadiusMeters)
-              : 25,
-          durationSecs:
-            item.durationSecs != null && item.durationSecs !== '' ? Number(item.durationSecs) : null,
+          targetLat: parseOptionalNumber(item.targetLat),
+          targetLng: parseOptionalNumber(item.targetLng),
+          triggerRadiusMeters: parseOptionalNumber(item.triggerRadiusMeters) ?? 25,
+          durationSecs: parseOptionalNumber(item.durationSecs),
         },
       });
 
@@ -79,7 +161,7 @@ async function replaceGameLevels(gameId: number, items: LevelSeedInput[]) {
             await tx.socialLink.create({
               data: {
                 levelId: created.id,
-                platform: sl.platform || 'Dossier',
+                platform: sl.platform?.trim() || 'Dossier',
                 url: sl.url.trim(),
               },
             });
@@ -89,6 +171,7 @@ async function replaceGameLevels(gameId: number, items: LevelSeedInput[]) {
     }
   });
 
+  invalidateLeaderboardCache();
   return prisma.level.findMany({
     where: { gameId },
     orderBy: { orderIndex: 'asc' },
@@ -96,22 +179,264 @@ async function replaceGameLevels(gameId: number, items: LevelSeedInput[]) {
   });
 }
 
+// ============================================================================
+// SHARED CLUE POOL BANK (DB-PERSISTED ACROSS COORDINATOR DEVICES)
+// ============================================================================
+router.get(
+  '/pool',
+  requireAuth('admin'),
+  asyncHandler(async (_req, res) => {
+    const rows = await prisma.cluePoolItem.findMany({ orderBy: { id: 'asc' } });
+    res.json(rows.map(serializePoolRow));
+  }),
+);
+
+router.post(
+  '/pool',
+  requireAuth('admin'),
+  asyncHandler(async (req, res) => {
+    const body = req.body as LevelSeedInput;
+    const title = typeof body.title === 'string' ? body.title.trim() : '';
+    if (!title) {
+      res.status(400).json({ error: 'Clue title is required' });
+      return;
+    }
+
+    const hints = Array.isArray(body.hints)
+      ? body.hints
+          .filter((h) => h && typeof h.text === 'string' && h.text.trim())
+          .map((h, i) => ({
+            text: h.text.trim(),
+            penaltyMins: Number.isFinite(Number(h.penaltyMins)) ? Number(h.penaltyMins) : (i + 1) * 2,
+          }))
+      : [];
+    const socialLinks = Array.isArray(body.socialLinks)
+      ? body.socialLinks
+          .filter((s) => s && typeof s.url === 'string' && s.url.trim())
+          .map((s) => ({
+            platform: s.platform?.trim() || 'Link',
+            url: s.url.trim(),
+          }))
+      : [];
+
+    const created = await prisma.cluePoolItem.create({
+      data: {
+        title,
+        clueText: typeof body.clueText === 'string' ? body.clueText.trim() : '',
+        locationHint: typeof body.locationHint === 'string' ? body.locationHint.trim() : '',
+        answer: typeof body.answer === 'string' ? body.answer.trim() : '',
+        targetLat: parseOptionalNumber(body.targetLat),
+        targetLng: parseOptionalNumber(body.targetLng),
+        triggerRadiusMeters: Math.max(5, Math.round(parseOptionalNumber(body.triggerRadiusMeters) ?? 25)),
+        durationSecs: parseOptionalNumber(body.durationSecs),
+        isFinal: Boolean(body.isFinal),
+        hintsJson: JSON.stringify(hints),
+        socialLinksJson: JSON.stringify(socialLinks),
+      },
+    });
+
+    res.status(201).json(serializePoolRow(created));
+  }),
+);
+
+router.put(
+  '/pool/:id',
+  requireAuth('admin'),
+  asyncHandler(async (req, res) => {
+    const id = parsePositiveInt(req.params.id);
+    if (!id) { res.status(400).json({ error: 'Invalid pool clue id' }); return; }
+
+    const existing = await prisma.cluePoolItem.findUnique({ where: { id } });
+    if (!existing) { res.status(404).json({ error: 'Pool clue not found' }); return; }
+
+    const body = req.body as LevelSeedInput;
+    const title = typeof body.title === 'string' ? body.title.trim() : existing.title;
+    if (!title) {
+      res.status(400).json({ error: 'Clue title cannot be empty' });
+      return;
+    }
+
+    const hints = Array.isArray(body.hints)
+      ? body.hints
+          .filter((h) => h && typeof h.text === 'string' && h.text.trim())
+          .map((h, i) => ({
+            text: h.text.trim(),
+            penaltyMins: Number.isFinite(Number(h.penaltyMins)) ? Number(h.penaltyMins) : (i + 1) * 2,
+          }))
+      : undefined;
+    const socialLinks = Array.isArray(body.socialLinks)
+      ? body.socialLinks
+          .filter((s) => s && typeof s.url === 'string' && s.url.trim())
+          .map((s) => ({
+            platform: s.platform?.trim() || 'Link',
+            url: s.url.trim(),
+          }))
+      : undefined;
+
+    const updated = await prisma.cluePoolItem.update({
+      where: { id },
+      data: {
+        title,
+        ...(typeof body.clueText === 'string' ? { clueText: body.clueText.trim() } : {}),
+        ...(typeof body.locationHint === 'string' ? { locationHint: body.locationHint.trim() } : {}),
+        ...(typeof body.answer === 'string' ? { answer: body.answer.trim() } : {}),
+        ...('targetLat' in body ? { targetLat: parseOptionalNumber(body.targetLat) } : {}),
+        ...('targetLng' in body ? { targetLng: parseOptionalNumber(body.targetLng) } : {}),
+        ...('triggerRadiusMeters' in body
+          ? { triggerRadiusMeters: Math.max(5, Math.round(parseOptionalNumber(body.triggerRadiusMeters) ?? 25)) }
+          : {}),
+        ...('durationSecs' in body ? { durationSecs: parseOptionalNumber(body.durationSecs) } : {}),
+        ...(body.isFinal !== undefined ? { isFinal: Boolean(body.isFinal) } : {}),
+        ...(hints !== undefined ? { hintsJson: JSON.stringify(hints) } : {}),
+        ...(socialLinks !== undefined ? { socialLinksJson: JSON.stringify(socialLinks) } : {}),
+      },
+    });
+
+    res.json(serializePoolRow(updated));
+  }),
+);
+
+router.delete(
+  '/pool/:id',
+  requireAuth('admin'),
+  asyncHandler(async (req, res) => {
+    const id = parsePositiveInt(req.params.id);
+    if (!id) { res.status(400).json({ error: 'Invalid pool clue id' }); return; }
+
+    const existing = await prisma.cluePoolItem.findUnique({ where: { id } });
+    if (!existing) { res.status(404).json({ error: 'Pool clue not found' }); return; }
+
+    await prisma.cluePoolItem.delete({ where: { id } });
+    res.json({ ok: true, deletedId: id });
+  }),
+);
+
+router.post(
+  '/pool/import-active/:gameId',
+  requireAuth('admin'),
+  asyncHandler(async (req, res) => {
+    const gameId = parsePositiveInt(req.params.gameId);
+    if (!gameId) { res.status(400).json({ error: 'Invalid gameId' }); return; }
+
+    const [activeLevels, existingPool] = await Promise.all([
+      prisma.level.findMany({
+        where: { gameId },
+        orderBy: { orderIndex: 'asc' },
+        include: { hints: { orderBy: { orderIndex: 'asc' } }, socialLinks: true },
+      }),
+      prisma.cluePoolItem.findMany({ select: { title: true } }),
+    ]);
+
+    const existingTitles = new Set(existingPool.map((p) => p.title.toLowerCase().trim()));
+    const toInsert = activeLevels.filter((lvl) => !existingTitles.has(lvl.title.toLowerCase().trim()));
+
+    if (toInsert.length > 0) {
+      await prisma.cluePoolItem.createMany({
+        data: toInsert.map((lvl) => ({
+          title: lvl.title,
+          clueText: lvl.clueText,
+          locationHint: lvl.locationHint,
+          answer: lvl.answer,
+          targetLat: lvl.targetLat,
+          targetLng: lvl.targetLng,
+          triggerRadiusMeters: lvl.triggerRadiusMeters ?? 25,
+          durationSecs: lvl.durationSecs ?? null,
+          isFinal: lvl.isFinal,
+          hintsJson: JSON.stringify(lvl.hints.map((h) => ({ text: h.text, penaltyMins: h.penaltyMins }))),
+          socialLinksJson: JSON.stringify(lvl.socialLinks.map((s) => ({ platform: s.platform, url: s.url }))),
+        })),
+      });
+    }
+
+    const allRows = await prisma.cluePoolItem.findMany({ orderBy: { id: 'asc' } });
+    res.json({ importedCount: toInsert.length, items: allRows.map(serializePoolRow) });
+  }),
+);
+
+router.post(
+  '/pool/import-json',
+  requireAuth('admin'),
+  asyncHandler(async (req, res) => {
+    const items = req.body?.items;
+    if (!Array.isArray(items) || items.length === 0) {
+      res.status(400).json({ error: 'items array is required' });
+      return;
+    }
+
+    const existingPool = await prisma.cluePoolItem.findMany({ select: { title: true } });
+    const existingTitles = new Set(existingPool.map((p) => p.title.toLowerCase().trim()));
+    let importedCount = 0;
+
+    for (const raw of items) {
+      const title = typeof raw?.title === 'string' ? raw.title.trim() : '';
+      if (!title || existingTitles.has(title.toLowerCase())) continue;
+      existingTitles.add(title.toLowerCase());
+
+      const hints = Array.isArray(raw.hints)
+        ? raw.hints
+            .filter((h: any) => h && typeof h.text === 'string' && h.text.trim())
+            .map((h: any, i: number) => ({
+              text: h.text.trim(),
+              penaltyMins: Number.isFinite(Number(h.penaltyMins)) ? Number(h.penaltyMins) : (i + 1) * 2,
+            }))
+        : [];
+      const socialLinks = Array.isArray(raw.socialLinks)
+        ? raw.socialLinks
+            .filter((s: any) => s && typeof s.url === 'string' && s.url.trim())
+            .map((s: any) => ({
+              platform: typeof s.platform === 'string' && s.platform.trim() ? s.platform.trim() : 'Link',
+              url: s.url.trim(),
+            }))
+        : [];
+
+      await prisma.cluePoolItem.create({
+        data: {
+          title,
+          clueText: typeof raw.clueText === 'string' ? raw.clueText.trim() : '',
+          locationHint: typeof raw.locationHint === 'string' ? raw.locationHint.trim() : '',
+          answer: typeof raw.answer === 'string' ? raw.answer.trim() : '',
+          targetLat: parseOptionalNumber(raw.targetLat),
+          targetLng: parseOptionalNumber(raw.targetLng),
+          triggerRadiusMeters: Math.max(5, Math.round(parseOptionalNumber(raw.triggerRadiusMeters) ?? 25)),
+          durationSecs: parseOptionalNumber(raw.durationSecs),
+          isFinal: Boolean(raw.isFinal),
+          hintsJson: JSON.stringify(hints),
+          socialLinksJson: JSON.stringify(socialLinks),
+        },
+      });
+      importedCount++;
+    }
+
+    const allRows = await prisma.cluePoolItem.findMany({ orderBy: { id: 'asc' } });
+    res.json({ importedCount, items: allRows.map(serializePoolRow) });
+  }),
+);
+
 // Generate Fiesta 2026 Official 13-Clue Round-Robin Pool + Sports Complex Final Location (14 Stages)
-router.post('/game/:gameId/generate-fiesta-pack', requireAuth('admin'), async (req, res) => {
-  const gameId = Number(req.params.gameId);
-  try {
+router.post(
+  '/game/:gameId/generate-fiesta-pack',
+  requireAuth('admin'),
+  asyncHandler(async (req, res) => {
+    const gameId = parsePositiveInt(req.params.gameId);
+    if (!gameId) { res.status(400).json({ error: 'Invalid gameId' }); return; }
+    const game = await prisma.game.findUnique({ where: { id: gameId } });
+    if (!game) { res.status(404).json({ error: 'Game not found' }); return; }
+
     const generated = await replaceGameLevels(gameId, FIESTA_2026_PACK);
     res.json({ ok: true, count: generated.length, levels: generated });
-  } catch (err: any) {
-    console.error('Failed to generate Fiesta 2026 pack:', err);
-    res.status(500).json({ error: err.message ?? 'Failed to generate Fiesta 2026 pack' });
-  }
-});
+  }),
+);
 
 // Generate complete 25 Intermediate Clues + 1 Grand Finale Pack (26 Clues Total)
-router.post('/game/:gameId/generate-25-pack', requireAuth('admin'), async (req, res) => {
-  const gameId = Number(req.params.gameId);
-  try {
+router.post(
+  '/game/:gameId/generate-25-pack',
+  requireAuth('admin'),
+  asyncHandler(async (req, res) => {
+    const gameId = parsePositiveInt(req.params.gameId);
+    if (!gameId) { res.status(400).json({ error: 'Invalid gameId' }); return; }
+    const game = await prisma.game.findUnique({ where: { id: gameId } });
+    if (!game) { res.status(404).json({ error: 'Game not found' }); return; }
+
     const SDMCET_26_PACK: LevelSeedInput[] = [
       { orderIndex: 1, title: 'Main Library Plaque', clueText: 'Decipher the brass foundation inscription at the main library threshold.', locationHint: 'Near Main Library Entrance', answer: 'library', targetLat: 15.4294, targetLng: 75.0135, triggerRadiusMeters: 25, isFinal: false, hints: [{ text: 'Look on the right cornerstone of the stairs', penaltyMins: 2 }, { text: 'Check under the brass bell emblem', penaltyMins: 4 }] },
       { orderIndex: 2, title: 'Central Canteen Gazebo', clueText: 'Inspect the cyber notice stickers under the central wooden pavilion.', locationHint: 'Canteen Lawn Pavilion', answer: 'fiesta', targetLat: 15.4282, targetLng: 75.0152, triggerRadiusMeters: 25, isFinal: false, hints: [{ text: 'Examine the pillar facing the lawn', penaltyMins: 2 }] },
@@ -143,170 +468,209 @@ router.post('/game/:gameId/generate-25-pack', requireAuth('admin'), async (req, 
 
     const generated = await replaceGameLevels(gameId, SDMCET_26_PACK);
     res.json({ ok: true, count: generated.length, levels: generated });
-  } catch (err: any) {
-    console.error('Failed to generate 26-pack:', err);
-    res.status(500).json({ error: err.message ?? 'Failed to generate 26-pack' });
-  }
-});
+  }),
+);
 
 // Deploy selected clues from Clue Pool Studio directly into active game
-router.post('/game/:gameId/deploy-pool', requireAuth('admin'), async (req, res) => {
-  const gameId = Number(req.params.gameId);
-  const { poolClues } = req.body as { poolClues: LevelSeedInput[] };
+router.post(
+  '/game/:gameId/deploy-pool',
+  requireAuth('admin'),
+  asyncHandler(async (req, res) => {
+    const gameId = parsePositiveInt(req.params.gameId);
+    if (!gameId) { res.status(400).json({ error: 'Invalid gameId' }); return; }
 
-  if (!Array.isArray(poolClues) || poolClues.length === 0) {
-    res.status(400).json({ error: 'Please select at least 1 clue from the pool to deploy.' });
-    return;
-  }
+    const { poolClues } = req.body as { poolClues: LevelSeedInput[] };
+    if (!Array.isArray(poolClues) || poolClues.length === 0) {
+      res.status(400).json({ error: 'Please select at least 1 clue from the pool to deploy.' });
+      return;
+    }
 
-  try {
     const deployed = await replaceGameLevels(gameId, poolClues);
     res.json({ ok: true, count: deployed.length, levels: deployed });
-  } catch (err: any) {
-    console.error('Failed to deploy pool clues:', err);
-    res.status(500).json({ error: err.message ?? 'Failed to deploy pool clues' });
-  }
-});
+  }),
+);
 
 // List levels for a game
-router.get('/game/:gameId', requireAuth('admin'), async (req, res) => {
-  const levels = await prisma.level.findMany({
-    where: { gameId: Number(req.params.gameId) },
-    orderBy: { orderIndex: 'asc' },
-    include: { socialLinks: true, hints: { orderBy: { orderIndex: 'asc' } }, checkpoints: true },
-  });
-  res.json(levels);
-});
+router.get(
+  '/game/:gameId',
+  requireAuth('admin'),
+  asyncHandler(async (req, res) => {
+    const gameId = parsePositiveInt(req.params.gameId);
+    if (!gameId) { res.status(400).json({ error: 'Invalid gameId' }); return; }
+
+    const levels = await prisma.level.findMany({
+      where: { gameId },
+      orderBy: { orderIndex: 'asc' },
+      include: { socialLinks: true, hints: { orderBy: { orderIndex: 'asc' } }, checkpoints: true },
+    });
+    res.json(levels);
+  }),
+);
 
 // Create level
-router.post('/game/:gameId', requireAuth('admin'), async (req, res) => {
-  const { hints, socialLinks, checkpoints, ...data } = req.body;
-  if ('targetLat' in data) data.targetLat = data.targetLat !== '' && data.targetLat != null ? Number(data.targetLat) : null;
-  if ('targetLng' in data) data.targetLng = data.targetLng !== '' && data.targetLng != null ? Number(data.targetLng) : null;
-  if ('triggerRadiusMeters' in data) data.triggerRadiusMeters = data.triggerRadiusMeters != null ? Number(data.triggerRadiusMeters) : 20;
-  if ('orderIndex' in data) data.orderIndex = Number(data.orderIndex);
-  if ('durationSecs' in data) data.durationSecs = data.durationSecs ? Number(data.durationSecs) : null;
+router.post(
+  '/game/:gameId',
+  requireAuth('admin'),
+  asyncHandler(async (req, res) => {
+    const gameId = parsePositiveInt(req.params.gameId);
+    if (!gameId) { res.status(400).json({ error: 'Invalid gameId' }); return; }
 
-  const level = await prisma.level.create({
-    data: { ...data, gameId: Number(req.params.gameId) },
-  });
+    const { hints, socialLinks } = req.body;
+    const cleanData = sanitizeLevelUpdateData(req.body);
+    if (!cleanData.title) {
+      res.status(400).json({ error: 'Stage title is required' });
+      return;
+    }
 
-  if (Array.isArray(hints)) {
-    for (let i = 0; i < hints.length; i++) {
-      const h = hints[i];
-      if (h && h.text && h.text.trim()) {
-        await prisma.hint.create({
-          data: {
-            levelId: level.id,
-            orderIndex: i + 1,
-            text: h.text.trim(),
-            penaltyMins: Number(h.penaltyMins ?? (i + 1) * 2),
-          },
-        });
+    const existingCount = await prisma.level.count({ where: { gameId } });
+
+    const level = await prisma.level.create({
+      data: {
+        gameId,
+        orderIndex: cleanData.orderIndex ?? existingCount + 1,
+        title: cleanData.title,
+        clueText: cleanData.clueText ?? '',
+        locationHint: cleanData.locationHint ?? '',
+        answer: cleanData.answer ?? '',
+        isFinal: cleanData.isFinal ?? false,
+        targetLat: cleanData.targetLat ?? null,
+        targetLng: cleanData.targetLng ?? null,
+        triggerRadiusMeters: cleanData.triggerRadiusMeters ?? 25,
+        durationSecs: cleanData.durationSecs ?? null,
+        mapOverlayGeoJson: cleanData.mapOverlayGeoJson ?? null,
+      },
+    });
+
+    if (Array.isArray(hints)) {
+      for (let i = 0; i < hints.length; i++) {
+        const h = hints[i];
+        if (h && h.text && h.text.trim()) {
+          await prisma.hint.create({
+            data: {
+              levelId: level.id,
+              orderIndex: i + 1,
+              text: h.text.trim(),
+              penaltyMins: Number(h.penaltyMins ?? (i + 1) * 2),
+            },
+          });
+        }
       }
     }
-  }
 
-  if (Array.isArray(socialLinks)) {
-    for (const sl of socialLinks) {
-      if (sl && sl.url && sl.url.trim()) {
-        await prisma.socialLink.create({
-          data: {
-            levelId: level.id,
-            platform: sl.platform || 'Dossier',
-            url: sl.url.trim(),
-          },
-        });
+    if (Array.isArray(socialLinks)) {
+      for (const sl of socialLinks) {
+        if (sl && sl.url && sl.url.trim()) {
+          await prisma.socialLink.create({
+            data: {
+              levelId: level.id,
+              platform: sl.platform?.trim() || 'Dossier',
+              url: sl.url.trim(),
+            },
+          });
+        }
       }
     }
-  }
 
-  const completeLevel = await prisma.level.findUnique({
-    where: { id: level.id },
-    include: { hints: { orderBy: { orderIndex: 'asc' } }, socialLinks: true },
-  });
-  res.status(201).json(completeLevel);
-});
+    const completeLevel = await prisma.level.findUnique({
+      where: { id: level.id },
+      include: { hints: { orderBy: { orderIndex: 'asc' } }, socialLinks: true },
+    });
+    res.status(201).json(completeLevel);
+  }),
+);
 
 // Update level
-router.put('/:id', requireAuth('admin'), async (req, res) => {
-  const id = Number(req.params.id);
-  const { hints, socialLinks, checkpoints, ...data } = req.body;
-  if ('targetLat' in data) data.targetLat = data.targetLat !== '' && data.targetLat != null ? Number(data.targetLat) : null;
-  if ('targetLng' in data) data.targetLng = data.targetLng !== '' && data.targetLng != null ? Number(data.targetLng) : null;
-  if ('triggerRadiusMeters' in data) data.triggerRadiusMeters = data.triggerRadiusMeters != null ? Number(data.triggerRadiusMeters) : 20;
-  if ('orderIndex' in data) data.orderIndex = Number(data.orderIndex);
-  if ('durationSecs' in data) data.durationSecs = data.durationSecs ? Number(data.durationSecs) : null;
+router.put(
+  '/:id',
+  requireAuth('admin'),
+  asyncHandler(async (req, res) => {
+    const id = parsePositiveInt(req.params.id);
+    if (!id) { res.status(400).json({ error: 'Invalid level id' }); return; }
 
-  await prisma.level.update({
-    where: { id },
-    data,
-  });
+    const existing = await prisma.level.findUnique({ where: { id } });
+    if (!existing) { res.status(404).json({ error: 'Level not found' }); return; }
 
-  if (Array.isArray(hints)) {
-    const existingHints = await prisma.hint.findMany({ where: { levelId: id }, select: { id: true } });
-    const hintIds = existingHints.map((h) => h.id);
-    if (hintIds.length > 0) {
-      await prisma.hintReveal.deleteMany({ where: { hintId: { in: hintIds } } });
-      await prisma.hint.deleteMany({ where: { levelId: id } });
-    }
+    const { hints, socialLinks } = req.body;
+    const cleanData = sanitizeLevelUpdateData(req.body);
 
-    for (let i = 0; i < hints.length; i++) {
-      const h = hints[i];
-      if (h && h.text && h.text.trim()) {
-        await prisma.hint.create({
-          data: {
-            levelId: id,
-            orderIndex: i + 1,
-            text: h.text.trim(),
-            penaltyMins: Number(h.penaltyMins ?? (i + 1) * 2),
-          },
-        });
+    await prisma.level.update({
+      where: { id },
+      data: cleanData,
+    });
+
+    if (Array.isArray(hints)) {
+      const existingHints = await prisma.hint.findMany({ where: { levelId: id }, select: { id: true } });
+      const hintIds = existingHints.map((h) => h.id);
+      if (hintIds.length > 0) {
+        await prisma.hintReveal.deleteMany({ where: { hintId: { in: hintIds } } });
+        await prisma.hint.deleteMany({ where: { levelId: id } });
+      }
+
+      for (let i = 0; i < hints.length; i++) {
+        const h = hints[i];
+        if (h && h.text && h.text.trim()) {
+          await prisma.hint.create({
+            data: {
+              levelId: id,
+              orderIndex: i + 1,
+              text: h.text.trim(),
+              penaltyMins: Number(h.penaltyMins ?? (i + 1) * 2),
+            },
+          });
+        }
       }
     }
-  }
 
-  if (Array.isArray(socialLinks)) {
-    await prisma.socialLink.deleteMany({ where: { levelId: id } });
-    for (const sl of socialLinks) {
-      if (sl && sl.url && sl.url.trim()) {
-        await prisma.socialLink.create({
-          data: {
-            levelId: id,
-            platform: sl.platform || 'Dossier',
-            url: sl.url.trim(),
-          },
-        });
+    if (Array.isArray(socialLinks)) {
+      await prisma.socialLink.deleteMany({ where: { levelId: id } });
+      for (const sl of socialLinks) {
+        if (sl && sl.url && sl.url.trim()) {
+          await prisma.socialLink.create({
+            data: {
+              levelId: id,
+              platform: sl.platform?.trim() || 'Dossier',
+              url: sl.url.trim(),
+            },
+          });
+        }
       }
     }
-  }
 
-  const completeLevel = await prisma.level.findUnique({
-    where: { id },
-    include: { hints: { orderBy: { orderIndex: 'asc' } }, socialLinks: true },
-  });
-  res.json(completeLevel);
-});
+    const completeLevel = await prisma.level.findUnique({
+      where: { id },
+      include: { hints: { orderBy: { orderIndex: 'asc' } }, socialLinks: true },
+    });
+    res.json(completeLevel);
+  }),
+);
 
-router.patch('/:id', requireAuth('admin'), async (req, res) => {
-  const data = { ...req.body };
-  if ('targetLat' in data) data.targetLat = data.targetLat !== '' && data.targetLat != null ? Number(data.targetLat) : null;
-  if ('targetLng' in data) data.targetLng = data.targetLng !== '' && data.targetLng != null ? Number(data.targetLng) : null;
-  if ('triggerRadiusMeters' in data) data.triggerRadiusMeters = data.triggerRadiusMeters != null ? Number(data.triggerRadiusMeters) : 20;
-  if ('orderIndex' in data) data.orderIndex = Number(data.orderIndex);
-  if ('durationSecs' in data) data.durationSecs = data.durationSecs ? Number(data.durationSecs) : null;
+router.patch(
+  '/:id',
+  requireAuth('admin'),
+  asyncHandler(async (req, res) => {
+    const id = parsePositiveInt(req.params.id);
+    if (!id) { res.status(400).json({ error: 'Invalid level id' }); return; }
 
-  const level = await prisma.level.update({
-    where: { id: Number(req.params.id) },
-    data,
-  });
-  res.json(level);
-});
+    const existing = await prisma.level.findUnique({ where: { id } });
+    if (!existing) { res.status(404).json({ error: 'Level not found' }); return; }
+
+    const cleanData = sanitizeLevelUpdateData(req.body);
+    const level = await prisma.level.update({
+      where: { id },
+      data: cleanData,
+    });
+    res.json(level);
+  }),
+);
 
 // Delete level with safe relation cascading
-router.delete('/:id', requireAuth('admin'), async (req, res) => {
-  try {
-    const id = Number(req.params.id);
+router.delete(
+  '/:id',
+  requireAuth('admin'),
+  asyncHandler(async (req, res) => {
+    const id = parsePositiveInt(req.params.id);
+    if (!id) { res.status(400).json({ error: 'Invalid level id' }); return; }
+
     const level = await prisma.level.findUnique({ where: { id } });
     if (!level) {
       res.status(404).json({ error: 'Level not found' });
@@ -353,33 +717,97 @@ router.delete('/:id', requireAuth('admin'), async (req, res) => {
       }
     });
 
+    invalidateLeaderboardCache();
     res.json({ ok: true, deletedLevelId: id });
-  } catch (err: any) {
-    console.error('Failed to delete level:', err);
-    res.status(500).json({ error: err.message ?? 'Failed to delete level' });
-  }
-});
+  }),
+);
 
 // Add hint
-router.post('/:id/hints', requireAuth('admin'), async (req, res) => {
-  const hint = await prisma.hint.create({
-    data: { ...req.body, levelId: Number(req.params.id) },
-  });
-  res.status(201).json(hint);
-});
+router.post(
+  '/:id/hints',
+  requireAuth('admin'),
+  asyncHandler(async (req, res) => {
+    const levelId = parsePositiveInt(req.params.id);
+    if (!levelId) { res.status(400).json({ error: 'Invalid level id' }); return; }
+
+    const { orderIndex, text, penaltyMins } = req.body as {
+      orderIndex?: number;
+      text?: string;
+      penaltyMins?: number;
+    };
+    if (!text?.trim()) { res.status(400).json({ error: 'Hint text is required' }); return; }
+
+    const count = await prisma.hint.count({ where: { levelId } });
+    const hint = await prisma.hint.create({
+      data: {
+        levelId,
+        orderIndex: Number.isFinite(Number(orderIndex)) ? Number(orderIndex) : count + 1,
+        text: text.trim(),
+        penaltyMins: Number.isFinite(Number(penaltyMins)) ? Number(penaltyMins) : 2,
+      },
+    });
+    res.status(201).json(hint);
+  }),
+);
 
 // Update hint
-router.put('/hints/:id', requireAuth('admin'), async (req, res) => {
-  const hint = await prisma.hint.update({ where: { id: Number(req.params.id) }, data: req.body });
-  res.json(hint);
-});
+router.put(
+  '/hints/:id',
+  requireAuth('admin'),
+  asyncHandler(async (req, res) => {
+    const id = parsePositiveInt(req.params.id);
+    if (!id) { res.status(400).json({ error: 'Invalid hint id' }); return; }
+
+    const existing = await prisma.hint.findUnique({ where: { id } });
+    if (!existing) { res.status(404).json({ error: 'Hint not found' }); return; }
+
+    const { orderIndex, text, penaltyMins } = req.body as {
+      orderIndex?: number;
+      text?: string;
+      penaltyMins?: number;
+    };
+    const hint = await prisma.hint.update({
+      where: { id },
+      data: {
+        ...(Number.isFinite(Number(orderIndex)) ? { orderIndex: Number(orderIndex) } : {}),
+        ...(typeof text === 'string' && text.trim() ? { text: text.trim() } : {}),
+        ...(Number.isFinite(Number(penaltyMins)) ? { penaltyMins: Number(penaltyMins) } : {}),
+      },
+    });
+    res.json(hint);
+  }),
+);
 
 // Add checkpoint
-router.post('/:id/checkpoints', requireAuth('admin'), async (req, res) => {
-  const cp = await prisma.checkpoint.create({
-    data: { ...req.body, levelId: Number(req.params.id) },
-  });
-  res.status(201).json(cp);
-});
+router.post(
+  '/:id/checkpoints',
+  requireAuth('admin'),
+  asyncHandler(async (req, res) => {
+    const levelId = parsePositiveInt(req.params.id);
+    if (!levelId) { res.status(400).json({ error: 'Invalid level id' }); return; }
+
+    const { kind, qrPayload, questionText, answer, rewardKind, rewardValue } = req.body as {
+      kind?: string;
+      qrPayload?: string;
+      questionText?: string;
+      answer?: string;
+      rewardKind?: string;
+      rewardValue?: number;
+    };
+
+    const cp = await prisma.checkpoint.create({
+      data: {
+        levelId,
+        kind: kind === 'question' ? 'question' : 'qr',
+        qrPayload: qrPayload ?? null,
+        questionText: questionText ?? null,
+        answer: answer ?? null,
+        rewardKind: rewardKind === 'free_hint' ? 'free_hint' : 'bonus_minutes',
+        rewardValue: Number.isFinite(Number(rewardValue)) ? Number(rewardValue) : 1,
+      },
+    });
+    res.status(201).json(cp);
+  }),
+);
 
 export default router;

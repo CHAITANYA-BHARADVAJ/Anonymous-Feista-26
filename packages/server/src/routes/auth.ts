@@ -1,20 +1,47 @@
-import { Router } from 'express';
+import { Router, Request } from 'express';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
 import { signToken } from '../lib/jwt';
 import { requireAuth, AuthRequest } from '../middleware/auth';
+import { asyncHandler } from '../lib/asyncHandler';
+import { createRateLimiter } from '../middleware/rateLimit';
 
 const router = Router();
-const COOKIE_OPTS = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'lax' as const,
-  maxAge: 12 * 60 * 60 * 1000,
-};
+
+function cookieOptions(req: Request) {
+  return {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production' && req.secure,
+    sameSite: 'lax' as const,
+    maxAge: 12 * 60 * 60 * 1000,
+  };
+}
+
+// Campus Wi-Fi / 4G NAT friendly limits: protect against brute-force per account & massive floods
+const registerIpLimiter = createRateLimiter({
+  windowMs: 60_000,
+  max: 120,
+  message: 'Registration rate limit reached. Please wait a moment.',
+});
+
+const teamLoginAccountLimiter = createRateLimiter({
+  windowMs: 5 * 60_000,
+  max: 20,
+  keyFn: (req) => `team:${req.ip}:${String(req.body?.name ?? '').trim().toLowerCase()}`,
+  message: 'Too many login attempts for this squad. Please wait 5 minutes or contact Event Control.',
+});
+
+const adminLoginAccountLimiter = createRateLimiter({
+  windowMs: 5 * 60_000,
+  max: 15,
+  keyFn: (req) => `admin:${req.ip}:${String(req.body?.username ?? '').trim().toLowerCase()}`,
+  message: 'Too many administrator login attempts. Please wait 5 minutes.',
+});
 
 // Registration status for public self-registration page
-router.get('/registration/status', async (_req, res) => {
-  try {
+router.get(
+  '/registration/status',
+  asyncHandler(async (_req, res) => {
     const game = await prisma.game.findFirst({ orderBy: { id: 'desc' } });
     const count = await prisma.team.count();
     const maxTeams = game?.maxTeams ?? 25;
@@ -25,14 +52,14 @@ router.get('/registration/status', async (_req, res) => {
       maxTeams,
       slotsRemaining: Math.max(0, maxTeams - count),
     });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
+  }),
+);
 
 // Team Self-Registration
-router.post('/team/register', async (req, res) => {
-  try {
+router.post(
+  '/team/register',
+  registerIpLimiter,
+  asyncHandler(async (req, res) => {
     const { name, leaderName, mobile, code } = req.body as {
       name?: string;
       leaderName?: string;
@@ -40,21 +67,28 @@ router.post('/team/register', async (req, res) => {
       code?: string;
     };
 
-    if (!name?.trim()) {
-      res.status(400).json({ error: 'Team Call-Sign is required.' });
+    const trimmedName = typeof name === 'string' ? name.trim() : '';
+    const trimmedCode = typeof code === 'string' ? code.trim() : '';
+    const trimmedLeader = typeof leaderName === 'string' && leaderName.trim() ? leaderName.trim() : null;
+    const trimmedMobile = typeof mobile === 'string' && mobile.trim() ? mobile.trim() : null;
+
+    if (!trimmedName || trimmedName.length > 80) {
+      res.status(400).json({ error: 'Team Call-Sign is required (max 80 characters).' });
       return;
     }
-    if (!code?.trim() || code.trim().length < 4) {
-      res.status(400).json({ error: 'Access Password must be at least 4 characters.' });
+    if (trimmedCode.length < 4 || trimmedCode.length > 64) {
+      res.status(400).json({ error: 'Access Password must be between 4 and 64 characters.' });
+      return;
+    }
+    if (trimmedLeader && trimmedLeader.length > 80) {
+      res.status(400).json({ error: 'Leader name must be at most 80 characters.' });
+      return;
+    }
+    if (trimmedMobile && trimmedMobile.length > 30) {
+      res.status(400).json({ error: 'Mobile number must be at most 30 characters.' });
       return;
     }
 
-    const trimmedName = name.trim();
-    const trimmedCode = code.trim();
-    const trimmedLeader = leaderName?.trim() || null;
-    const trimmedMobile = mobile?.trim() || null;
-
-    // Check game settings
     const game = await prisma.game.findFirst({ orderBy: { id: 'desc' } });
     if (game && !game.registrationOpen) {
       res.status(403).json({ error: 'Public registration is currently closed by event coordinators.' });
@@ -71,7 +105,7 @@ router.post('/team/register', async (req, res) => {
     }
 
     // Check duplicate name (case-insensitive check)
-    const allTeams = await prisma.team.findMany();
+    const allTeams = await prisma.team.findMany({ select: { id: true, name: true } });
     const existing = allTeams.find((t) => t.name.toLowerCase() === trimmedName.toLowerCase());
     if (existing) {
       res.status(409).json({
@@ -80,23 +114,32 @@ router.post('/team/register', async (req, res) => {
       return;
     }
 
-    // Hash access code
     const hashedCode = await bcrypt.hash(trimmedCode, 10);
 
-    const team = await prisma.team.create({
-      data: {
-        name: trimmedName,
-        code: hashedCode,
-        displayCode: trimmedCode,
-        leaderName: trimmedLeader,
-        mobile: trimmedMobile,
-      },
-    });
+    let team;
+    try {
+      team = await prisma.team.create({
+        data: {
+          name: trimmedName,
+          code: hashedCode,
+          displayCode: trimmedCode,
+          leaderName: trimmedLeader,
+          mobile: trimmedMobile,
+        },
+      });
+    } catch (err: any) {
+      if (err?.code === 'P2002') {
+        res.status(409).json({
+          error: `Team call-sign "${trimmedName}" is already registered. Please choose another name.`,
+        });
+        return;
+      }
+      throw err;
+    }
 
-    // Create session token
     const { token, jti } = signToken(team.id, 'team');
     await prisma.teamSession.create({ data: { teamId: team.id, jti } });
-    res.cookie('ch_token', token, COOKIE_OPTS);
+    res.cookie('ch_token', token, cookieOptions(req));
 
     // If game is already running, allocate starting clue immediately
     if (game?.status === 'running') {
@@ -116,25 +159,23 @@ router.post('/team/register', async (req, res) => {
       mobile: team.mobile,
       token,
     });
-  } catch (err: any) {
-    console.error('Registration error:', err);
-    res.status(500).json({ error: err.message ?? 'Registration failed. Please try again.' });
-  }
-});
+  }),
+);
 
 // Team login
-router.post('/team/login', async (req, res) => {
-  try {
+router.post(
+  '/team/login',
+  teamLoginAccountLimiter,
+  asyncHandler(async (req, res) => {
     const { name, code } = req.body as { name?: string; code?: string };
-    if (!name?.trim() || !code?.trim()) {
+    const trimmedName = typeof name === 'string' ? name.trim() : '';
+    const trimmedCode = typeof code === 'string' ? code.trim() : '';
+
+    if (!trimmedName || !trimmedCode) {
       res.status(400).json({ error: 'Team name and access code required' });
       return;
     }
 
-    const trimmedName = name.trim();
-    const trimmedCode = code.trim();
-
-    // Look up exact match first, then case-insensitive, then stripped-spaces & 'team ' prefix
     const norm = (s: string) => s.toLowerCase().replace(/[\s\-_]+/g, '');
     let team = await prisma.team.findUnique({ where: { name: trimmedName } });
     if (!team) {
@@ -155,47 +196,16 @@ router.post('/team/login', async (req, res) => {
       return;
     }
 
-    // Verify bcrypt hash or plaintext fallback or displayCode / known defaults
     let matches = false;
     try {
       matches = await bcrypt.compare(trimmedCode, team.code);
     } catch {}
 
-    // Check lowercase code (handles mobile keyboards auto-capitalizing first letter)
-    if (!matches) {
+    // Fallback for mobile keyboards auto-capitalizing first letter when code was registered lowercase
+    if (!matches && trimmedCode !== trimmedCode.toLowerCase()) {
       try {
         matches = await bcrypt.compare(trimmedCode.toLowerCase(), team.code);
       } catch {}
-    }
-
-    // Check against displayCode (exact and case-insensitive)
-    if (!matches && team.displayCode) {
-      if (
-        team.displayCode === trimmedCode ||
-        team.displayCode.toLowerCase() === trimmedCode.toLowerCase()
-      ) {
-        matches = true;
-      }
-    }
-
-    // Check known defaults for seeded teams (hunt2026/alpha26 for Alpha; fiesta26/beta26 for Beta)
-    if (!matches) {
-      const tNorm = norm(team.name);
-      const cLow = trimmedCode.toLowerCase();
-      if (tNorm.includes('alpha') && (cLow === 'hunt2026' || cLow === 'alpha26')) {
-        matches = true;
-      } else if (tNorm.includes('beta') && (cLow === 'fiesta26' || cLow === 'beta26')) {
-        matches = true;
-      } else if (tNorm.includes('cyberphantoms') && cLow === 'cyber26') {
-        matches = true;
-      } else if (tNorm.includes('titan') && cLow === 'titan26') {
-        matches = true;
-      }
-    }
-
-    // Plaintext code fallback
-    if (!matches && (team.code === trimmedCode || team.code.toLowerCase() === trimmedCode.toLowerCase())) {
-      matches = true;
     }
 
     if (!matches) {
@@ -203,7 +213,7 @@ router.post('/team/login', async (req, res) => {
       return;
     }
 
-    // Revoke any existing sessions
+    // Revoke any existing sessions (1 active phone per squad)
     await prisma.teamSession.updateMany({
       where: { teamId: team.id, revokedAt: null },
       data: { revokedAt: new Date() },
@@ -212,47 +222,52 @@ router.post('/team/login', async (req, res) => {
     const { token, jti } = signToken(team.id, 'team');
     await prisma.teamSession.create({ data: { teamId: team.id, jti } });
 
-    res.cookie('ch_token', token, COOKIE_OPTS);
+    res.cookie('ch_token', token, cookieOptions(req));
     res.json({
       teamId: team.id,
       teamName: team.name,
       token,
     });
-  } catch (err: any) {
-    console.error('Participant login exception:', err);
-    res.status(500).json({ error: err.message ?? 'Login failed due to server error' });
-  }
-});
+  }),
+);
 
 // Admin login
-router.post('/admin/login', async (req, res) => {
-  const { username, password } = req.body as { username?: string; password?: string };
-  const expectedUser = (process.env.ADMIN_USERNAME || 'admin').replace(/['"]/g, '').trim();
-  const expectedPass = (process.env.ADMIN_PASSWORD || 'admin123').replace(/['"]/g, '').trim();
+router.post(
+  '/admin/login',
+  adminLoginAccountLimiter,
+  asyncHandler(async (req, res) => {
+    const { username, password } = req.body as { username?: string; password?: string };
+    const expectedUser = (process.env.ADMIN_USERNAME || 'admin').replace(/['"]/g, '').trim();
+    const expectedPass = (process.env.ADMIN_PASSWORD || 'admin123').replace(/['"]/g, '').trim();
 
-  const userMatch = username?.trim().toLowerCase() === expectedUser.toLowerCase();
-  const passMatch = password?.trim() === expectedPass;
+    const userMatch = typeof username === 'string' && username.trim().toLowerCase() === expectedUser.toLowerCase();
+    const passMatch = typeof password === 'string' && password.trim() === expectedPass;
 
-  if (!userMatch || !passMatch) {
-    res.status(401).json({ error: 'Invalid credentials' });
-    return;
-  }
+    if (!userMatch || !passMatch) {
+      res.status(401).json({ error: 'Invalid credentials' });
+      return;
+    }
 
-  const { token } = signToken(0, 'admin');
-  res.cookie('ch_token', token, COOKIE_OPTS);
-  res.json({ role: 'admin', token });
-});
+    const { token } = signToken(0, 'admin');
+    res.cookie('ch_token', token, cookieOptions(req));
+    res.json({ role: 'admin', token });
+  }),
+);
 
 // Logout
-router.post('/logout', requireAuth(), async (req: AuthRequest, res) => {
-  if (req.user?.role === 'team') {
-    await prisma.teamSession.updateMany({
-      where: { jti: req.user.jti },
-      data: { revokedAt: new Date() },
-    });
-  }
-  res.clearCookie('ch_token');
-  res.json({ ok: true });
-});
+router.post(
+  '/logout',
+  requireAuth(),
+  asyncHandler(async (req: AuthRequest, res) => {
+    if (req.user?.role === 'team') {
+      await prisma.teamSession.updateMany({
+        where: { jti: req.user.jti },
+        data: { revokedAt: new Date() },
+      });
+    }
+    res.clearCookie('ch_token');
+    res.json({ ok: true });
+  }),
+);
 
 export default router;

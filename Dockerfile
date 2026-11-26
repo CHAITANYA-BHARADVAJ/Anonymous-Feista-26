@@ -44,21 +44,25 @@ COPY package*.json ./
 COPY packages/client/package*.json ./packages/client/
 COPY packages/server/package*.json ./packages/server/
 
-# Copy dependencies and generated prisma client
+# Copy dependencies and generated prisma client (keeps prisma & tsx CLI for migrate/seed)
 COPY --from=builder /app/node_modules ./node_modules
 
 # Copy compiled artifacts
 COPY --from=builder /app/packages/server/dist ./packages/server/dist
 COPY --from=builder /app/packages/client/dist ./packages/client/dist
 COPY --from=builder /app/packages/server/prisma ./packages/server/prisma
+COPY --from=builder /app/packages/server/src/data ./packages/server/src/data
 
 # Copy entrypoint script
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh
 
-# Create data and uploads directories
-RUN mkdir -p /app/packages/server/uploads /app/data
+# Create data, backup, and uploads directories
+RUN mkdir -p /app/packages/server/uploads /data/backups
 
 EXPOSE 3001
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:' + (process.env.PORT || 3001) + '/api/v1/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
