@@ -75,41 +75,8 @@ COUNT=$(node -e '
 echo "📊 Current active game count in database: $COUNT"
 
 if [ "$COUNT" = "0" ] || [ "${FORCE_SEED:-false}" = "true" ]; then
-  echo "🌱 Seeding SDMCET landmarks, Fiesta 2026 clues, shared Clue Pool, and default teams..."
+  echo "🌱 Initializing clean base Game & campus boundary zones..."
   npx tsx /app/packages/server/prisma/seed.ts
-else
-  # Non-destructive backfill of shared CluePoolItem bank when upgrading existing EC2 database
-  POOL_COUNT=$(node -e '
-    const { PrismaClient } = require("@prisma/client");
-    const p = new PrismaClient();
-    p.cluePoolItem.count()
-      .then(c => { console.log(c); process.exit(0); })
-      .catch(() => { console.log(0); process.exit(0); });
-  ' 2>/dev/null || echo "0")
-
-  if [ "$POOL_COUNT" = "0" ]; then
-    echo "🌱 Backfilling shared Clue Pool library from Fiesta 2026 pack..."
-    npx tsx -e '
-      import { PrismaClient } from "@prisma/client";
-      import { FIESTA_2026_PACK } from "/app/packages/server/src/data/fiesta2026Pack";
-      const prisma = new PrismaClient();
-      prisma.cluePoolItem.createMany({
-        data: FIESTA_2026_PACK.map((item) => ({
-          title: item.title,
-          clueText: item.clueText,
-          locationHint: item.locationHint,
-          answer: item.answer,
-          targetLat: item.targetLat,
-          targetLng: item.targetLng,
-          triggerRadiusMeters: item.triggerRadiusMeters,
-          durationSecs: item.durationSecs ?? null,
-          isFinal: item.isFinal,
-          hintsJson: JSON.stringify(item.hints ?? []),
-          socialLinksJson: JSON.stringify(item.socialLinks ?? []),
-        })),
-      }).finally(() => prisma.$disconnect());
-    ' || true
-  fi
 fi
 
 echo "🚀 Starting Node.js server on port ${PORT:-3001} (0.0.0.0)..."

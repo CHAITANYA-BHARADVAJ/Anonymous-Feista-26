@@ -24,10 +24,7 @@ export default function AdminTeams() {
 
   // Printable Cards Modal
   const [showPrintModal, setShowPrintModal] = useState(false);
-  const [recentCredentials, setRecentCredentials] = useState<Record<string, string>>({
-    'Team Alpha': 'alpha26',
-    'Team Beta': 'beta26',
-  });
+  const [recentCredentials, setRecentCredentials] = useState<Record<string, string>>({});
 
   // Reset Access Code Modal state
   const [resetCodeTeam, setResetCodeTeam] = useState<any | null>(null);

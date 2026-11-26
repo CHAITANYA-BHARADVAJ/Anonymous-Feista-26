@@ -138,7 +138,8 @@ async function runGameplayFlowTests() {
     failed++;
   }
 
-  // 2. Fetch Active Game & Ensure Levels Exist
+  // 2. Fetch Active Game & Ensure Levels Exist (temporarily load if DB is empty, clean up afterward)
+  let seededTempLevels = false;
   try {
     process.stdout.write('2. Querying Active Game State & Clues... ');
     const res = await request('/games', {
@@ -152,6 +153,7 @@ async function runGameplayFlowTests() {
       headers: { Authorization: `Bearer ${adminToken}` },
     });
     if (!Array.isArray(levelsRes.data) || levelsRes.data.length === 0) {
+      seededTempLevels = true;
       await request(`/levels/game/${activeGameId}/generate-fiesta-pack`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${adminToken}` },
@@ -439,6 +441,19 @@ async function runGameplayFlowTests() {
       headers: { Authorization: `Bearer ${adminToken}` },
       body: { action: 'reset' },
     });
+    if (seededTempLevels) {
+      const lvls = await request(`/levels/game/${activeGameId}`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      if (Array.isArray(lvls.data)) {
+        for (const l of lvls.data) {
+          await request(`/levels/${l.id}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${adminToken}` },
+          });
+        }
+      }
+    }
   } catch {}
 
   console.log(`\nSuite 3 Summary: ${passed} Passed, ${failed} Failed.`);

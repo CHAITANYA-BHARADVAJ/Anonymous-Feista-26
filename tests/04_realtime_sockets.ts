@@ -65,6 +65,30 @@ async function runSocketRealtimeTests() {
   const games = await request('/games', { headers: { Authorization: `Bearer ${adminToken}` } });
   const gameId = games.data?.[0]?.id || 1;
 
+  // Ensure at least 1 clue exists for starting the game; clean it up if we created it
+  let tempLevelId: number | null = null;
+  const existingLevels = await request(`/levels/game/${gameId}`, {
+    headers: { Authorization: `Bearer ${adminToken}` },
+  });
+  if (!Array.isArray(existingLevels.data) || existingLevels.data.length === 0) {
+    const created = await request(`/levels/game/${gameId}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken}` },
+      body: {
+        title: 'Socket Temp Clue',
+        orderIndex: 1,
+        clueText: 'Temp socket test clue',
+        locationHint: 'Main Quad',
+        answer: 'socketkey',
+        targetLat: 15.4286,
+        targetLng: 75.015,
+        triggerRadiusMeters: 25,
+        isFinal: false,
+      },
+    });
+    tempLevelId = created.data?.id ?? null;
+  }
+
   // Put game in 'running' mode so location updates are accepted
   await request(`/games/${gameId}/status`, {
     method: 'PATCH',
@@ -217,6 +241,12 @@ async function runSocketRealtimeTests() {
 
     if (teamId) {
       await request(`/admin/teams/${teamId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+    }
+    if (tempLevelId) {
+      await request(`/levels/${tempLevelId}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${adminToken}` },
       });

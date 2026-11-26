@@ -10,53 +10,95 @@ interface SpeakOptions {
   onStartBlocked?: () => void;
 }
 
+const DEFAULT_MALE_RATE = 0.92;
+const DEFAULT_MALE_PITCH = 0.84;
+
 let activeTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingSpeakTimer: ReturnType<typeof setTimeout> | null = null;
+let autoplayCheckTimer: ReturnType<typeof setTimeout> | null = null;
 let lastSpokenKey = '';
 let lastSpokenAt = 0;
+let cachedVoices: SpeechSynthesisVoice[] = [];
+let voicesListenerAttached = false;
+
+// Explicit male voice names and tokens across Windows, Edge Natural, Chrome/Google, Android, iOS, and macOS
+const MALE_VOICE_PATTERNS: RegExp[] = [
+  /google uk english male/i,
+  /(?:^|[^a-z])male(?:[^a-z]|$)/i,
+  /microsoft (?:david|mark|george|guy|ryan|christopher|eric|ravi|prabhat|andrew|brian|steffan|roger|brandon|jacob|tony|davis|jason|connor|liam|william|sam|mitchell|wayne|abeo|elimu|luke)\b/i,
+  /\b(?:daniel|alex|rishi|aaron|arthur|oliver|gordon|fred|ralph|bruce|matthew|joey|justin|stephen|gregory|russell|eddy|reed|rocko)\b/i,
+];
+
+// Known female voices (including voices without "female" in their label such as Chrome's Google US English)
+const FEMALE_VOICE_PATTERNS: RegExp[] = [
+  /(?:^|[^a-z])female(?:[^a-z]|$)/i,
+  /google us english(?!.*male)/i,
+  /\b(?:zira|samantha|aria|jenny|karen|susan|hazel|catherine|victoria|tessa|veena|moira|heera|kalpana|neerja|swara|libby|sonia|mia|natasha|clara|molly|emily|luna|michelle|emma|ava|ana|ashley|amber|cora|elizabeth|monica|allison|nora|kate|serena|fiona|heather|joanna|kendra|kimberly|salli|ivy|kathy|vicki|agnes|princess|shelley|flo|grandma)\b/i,
+];
 
 function hasSpeechSupport(): boolean {
   return typeof window !== 'undefined' && 'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined';
 }
 
+function clearVoiceTimers(): void {
+  if (activeTimer) {
+    clearTimeout(activeTimer);
+    activeTimer = null;
+  }
+  if (pendingSpeakTimer) {
+    clearTimeout(pendingSpeakTimer);
+    pendingSpeakTimer = null;
+  }
+  if (autoplayCheckTimer) {
+    clearTimeout(autoplayCheckTimer);
+    autoplayCheckTimer = null;
+  }
+}
+
+function refreshVoices(): SpeechSynthesisVoice[] {
+  if (!hasSpeechSupport()) return [];
+  const loaded = window.speechSynthesis.getVoices();
+  if (loaded.length > 0) {
+    cachedVoices = loaded;
+  }
+  if (!voicesListenerAttached) {
+    voicesListenerAttached = true;
+    try {
+      window.speechSynthesis.addEventListener?.('voiceschanged', () => {
+        const updated = window.speechSynthesis.getVoices();
+        if (updated.length > 0) cachedVoices = updated;
+      });
+    } catch {}
+  }
+  return loaded.length > 0 ? loaded : cachedVoices;
+}
+
 /** Pick calm, deep male English PA voice available on the device */
-function selectPaVoice(): SpeechSynthesisVoice | null {
-  if (!hasSpeechSupport()) return null;
-  const voices = window.speechSynthesis.getVoices();
-  if (!voices.length) return null;
+function selectPaVoice(): { voice: SpeechSynthesisVoice | null; confirmedMale: boolean } {
+  const voices = refreshVoices();
+  if (!voices.length) return { voice: null, confirmedMale: false };
 
   const englishVoices = voices.filter((v) => v.lang.toLowerCase().startsWith('en'));
   const pool = englishVoices.length > 0 ? englishVoices : voices;
 
-  // Strongly prefer natural male PA voices across Windows, Android, iOS, and macOS
-  const malePatterns = [
-    /google uk english male/i,
-    /microsoft mark/i,
-    /microsoft david/i,
-    /microsoft george/i,
-    /microsoft guy/i,
-    /microsoft ryan/i,
-    /microsoft christopher/i,
-    /microsoft eric/i,
-    /microsoft ravi/i,
-    /microsoft prabhat/i,
-    /\bdaniel\b/i,
-    /\balex\b/i,
-    /\brishi\b/i,
-    /\baaron\b/i,
-    /\barthur\b/i,
-    /\bmale\b/i,
-  ];
+  const isFemale = (voice: SpeechSynthesisVoice) =>
+    FEMALE_VOICE_PATTERNS.some((pattern) => pattern.test(voice.name));
 
-  for (const pattern of malePatterns) {
-    const match = pool.find((v) => pattern.test(v.name));
-    if (match) return match;
+  for (const pattern of MALE_VOICE_PATTERNS) {
+    const match = pool.find((v) => pattern.test(v.name) && !isFemale(v));
+    if (match) return { voice: match, confirmedMale: true };
   }
 
-  // Avoid obviously female voices if an unknown neutral/male fallback exists
-  const nonFemale = pool.find(
-    (v) => !/female|zira|samantha|aria|jenny|karen|susan|hazel|catherine|victoria|tessa|veena|moira/i.test(v.name),
-  );
-  return nonFemale ?? pool[0] ?? null;
+  // Fallback to a voice not known to be female, otherwise first English voice with deep pitch shift
+  const nonFemale = pool.find((v) => !isFemale(v));
+  return { voice: nonFemale ?? pool[0] ?? null, confirmedMale: false };
+}
+
+/** Clamp pitch into male vocal range (drops unverified/female browser defaults into baritone register) */
+function resolveMalePitch(requestedPitch: number | undefined, confirmedMale: boolean): number {
+  const target = requestedPitch ?? DEFAULT_MALE_PITCH;
+  const maxPitch = confirmedMale ? 0.85 : 0.72;
+  return Math.max(0.55, Math.min(target, maxPitch));
 }
 
 /**
@@ -69,18 +111,18 @@ export function primeSpeechEngine() {
 
   if (!hasSpeechSupport()) return;
   try {
-    window.speechSynthesis.getVoices();
+    const { voice, confirmedMale } = selectPaVoice();
     const primer = new SpeechSynthesisUtterance('');
+    if (voice) primer.voice = voice;
+    primer.lang = voice?.lang || 'en-US';
+    primer.pitch = resolveMalePitch(DEFAULT_MALE_PITCH, confirmedMale);
     primer.volume = 0;
     window.speechSynthesis.speak(primer);
   } catch {}
 }
 
 export function stopPaVoice() {
-  if (activeTimer) {
-    clearTimeout(activeTimer);
-    activeTimer = null;
-  }
+  clearVoiceTimers();
   if (hasSpeechSupport()) {
     try {
       window.speechSynthesis.cancel();
@@ -98,8 +140,8 @@ export function speakPaMessage(text: string, options: SpeakOptions = {}) {
     priority = 'normal',
     chime = 'pa',
     tone = 'pa',
-    rate = 0.92,
-    pitch = 0.84,
+    rate = DEFAULT_MALE_RATE,
+    pitch = DEFAULT_MALE_PITCH,
     onStartBlocked,
   } = options;
   const store = useVoiceStore.getState();
@@ -118,9 +160,8 @@ export function speakPaMessage(text: string, options: SpeakOptions = {}) {
 
   if (priority === 'high') {
     stopPaVoice();
-  } else if (activeTimer) {
-    clearTimeout(activeTimer);
-    activeTimer = null;
+  } else {
+    clearVoiceTimers();
   }
 
   if (chime === 'pa') {
@@ -140,6 +181,9 @@ export function speakPaMessage(text: string, options: SpeakOptions = {}) {
     return;
   }
 
+  // Warm voice list early so async engines populate before startDelay ends
+  refreshVoices();
+
   const startDelay = chime === 'none' ? 50 : chime === 'kickoff' ? 680 : 520;
   let started = false;
 
@@ -152,16 +196,17 @@ export function speakPaMessage(text: string, options: SpeakOptions = {}) {
     useVoiceStore.getState().setSpeakingState(false, null, tone);
   }, fallbackMs);
 
-  setTimeout(() => {
+  pendingSpeakTimer = setTimeout(() => {
+    pendingSpeakTimer = null;
     if (useVoiceStore.getState().muted) return;
     try {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(cleanText);
-      const voice = selectPaVoice();
+      const { voice, confirmedMale } = selectPaVoice();
       if (voice) utterance.voice = voice;
       utterance.lang = voice?.lang || 'en-US';
       utterance.rate = rate;
-      utterance.pitch = pitch;
+      utterance.pitch = resolveMalePitch(pitch, confirmedMale);
       utterance.volume = 1;
 
       utterance.onstart = () => {
@@ -170,10 +215,7 @@ export function speakPaMessage(text: string, options: SpeakOptions = {}) {
       };
 
       utterance.onend = () => {
-        if (activeTimer) {
-          clearTimeout(activeTimer);
-          activeTimer = null;
-        }
+        clearVoiceTimers();
         useVoiceStore.getState().setSpeakingState(false, null, tone);
       };
 
@@ -182,10 +224,7 @@ export function speakPaMessage(text: string, options: SpeakOptions = {}) {
           useVoiceStore.getState().setAutoplayBlocked(true);
           onStartBlocked?.();
         }
-        if (activeTimer) {
-          clearTimeout(activeTimer);
-          activeTimer = null;
-        }
+        clearVoiceTimers();
         useVoiceStore.getState().setSpeakingState(false, null, tone);
       };
 
@@ -193,7 +232,8 @@ export function speakPaMessage(text: string, options: SpeakOptions = {}) {
 
       // Detect silent autoplay blocks quickly (~900ms) on strict mobile browsers
       if (onStartBlocked) {
-        setTimeout(() => {
+        autoplayCheckTimer = setTimeout(() => {
+          autoplayCheckTimer = null;
           if (!started && !window.speechSynthesis.speaking && !useVoiceStore.getState().muted) {
             useVoiceStore.getState().setAutoplayBlocked(true);
             onStartBlocked();
@@ -201,6 +241,7 @@ export function speakPaMessage(text: string, options: SpeakOptions = {}) {
         }, 900);
       }
     } catch {
+      clearVoiceTimers();
       useVoiceStore.getState().setSpeakingState(false, null, tone);
     }
   }, startDelay);
@@ -234,8 +275,8 @@ export function announceGameStarted() {
       priority: 'high',
       chime: 'kickoff',
       tone: 'success',
-      rate: 1.03,
-      pitch: 0.94,
+      rate: 1.0,
+      pitch: 0.84,
     },
   );
 }
